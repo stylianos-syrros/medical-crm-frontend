@@ -1,0 +1,61 @@
+1. Fixed frontend run issue under `D:\P&I` path by changing Vite scripts in `frontend/package.json` to direct `node ./node_modules/vite/bin/vite.js ...`.
+
+2. Checked backend API/security and confirmed login endpoint exists at:
+- `POST /api/auth/login` in `backend/src/main/java/com/medicalcrm/backend/controller/AuthController.java`.
+
+3. Updated backend security for frontend integration:
+- enabled CORS in `backend/src/main/java/com/medicalcrm/backend/config/SecurityConfig.java`
+- added CORS config imports and fixed compile.
+
+4. Created basic React routing in `frontend/src/App.jsx`:
+- `/login`
+- `/admin`
+- `/doctor`
+- `/patient`
+
+5. Created page components:
+- `frontend/src/pages/LoginPage.jsx`
+- `frontend/src/pages/AdminDashboard.jsx`
+- `frontend/src/pages/DoctorDashboard.jsx`
+- `frontend/src/pages/PatientDashboard.jsx`
+
+6. Implemented real login flow in `LoginPage.jsx`:
+- sends request to backend login endpoint
+- gets token
+- parses role from JWT
+- stores token/role in `localStorage`
+- redirects by role dashboard
+- shows backend error message on failure.
+
+7. Switched login request logic to pure axios (removed fetch-only code).
+
+8. Added route guard components:
+- `frontend/src/components/RequireAuth.jsx`
+- `frontend/src/components/RequireRole.jsx`
+
+9. Updated `App.jsx` to protect routes by auth and role.
+
+10. Added logout action in dashboard pages by clearing `localStorage` and navigating to `/login`.
+
+11. Set up Redux foundation files:
+- `frontend/src/app/store.js`
+- `frontend/src/features/auth/authSlice.js`
+- connected provider in `frontend/src/main.jsx` (in progress, with one import-path fix in `store.js`: `../features/auth/authSlice`).
+
+12. Moved route guards from `localStorage` checks to Redux state:
+- `frontend/src/components/RequireAuth.jsx` now uses `state.auth.isAuthenticated`
+- `frontend/src/components/RequireRole.jsx` now uses `state.auth.isAuthenticated` and `state.auth.role`
+
+13. Connected login to Redux auth flow:
+- `frontend/src/pages/LoginPage.jsx` dispatches `setCredentials({ token, role })`
+
+14. Updated dashboard logout flow to Redux:
+- `frontend/src/pages/AdminDashboard.jsx`
+- `frontend/src/pages/DoctorDashboard.jsx`
+- `frontend/src/pages/PatientDashboard.jsx`
+- all dispatch `logout()` and navigate to `/login`
+
+15. Added auto-redirect from login page for already-authenticated users (role-based) in `frontend/src/pages/LoginPage.jsx`.
+
+16. Validation step:
+- frontend build succeeds with `npm run build` after these fixes.
