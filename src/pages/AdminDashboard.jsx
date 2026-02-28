@@ -2,7 +2,15 @@ import { useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { logout } from "../features/auth/authSlice";
 import { useState } from "react";
-import { createUser, getAllUsers , enableUser, disableUser, changeUserRole, updateUser, changePassword} from "../features/user/usersApi"; 
+import { createUser, 
+    getAllUsers, 
+    enableUser, 
+    disableUser, 
+    changeUserRole, 
+    updateUser, 
+    changePassword,
+    deleteUser,
+} from "../features/user/usersApi"; 
 
 function AdminDashboard() {
     const navigate = useNavigate();
@@ -250,6 +258,39 @@ function AdminDashboard() {
         }
     };
 
+
+
+    const [deleteLoadingId, setDeleteLoadingId] = useState(null);
+    const [deleteError, setDeleteError] = useState("");
+    const [deleteTarget, setDeleteTarget] = useState(null); // user object or null
+
+    const handleDeleteUser = async (user) => {
+        if (user.role === "ADMIN") {
+            setDeleteError("Cannot delete admin user");
+            return;
+        }
+
+        setDeleteError("");
+        setDeleteLoadingId(user.id);
+
+        try {
+            await deleteUser(user.id);
+            await loadUsers();
+        } catch (error) {
+            setDeleteError(
+            error.response?.data?.message ||
+                error.response?.data ||
+                error.message ||
+                "Failed to delete user"
+            );
+        } finally {
+            setDeleteLoadingId(null);
+            setDeleteTarget(null);
+        }
+    };
+
+
+
         
     const thStyle = {
         border: "1px solid #d1d5db",
@@ -359,6 +400,7 @@ function AdminDashboard() {
                 {editError && <p style={{ color: "red" }}>{editError}</p>}
                 {passwordError && <p style={{ color: "red" }}>{passwordError}</p>}
                 {passwordSuccess && <p style={{ color: "green" }}>{passwordSuccess}</p>}
+                {deleteError && <p style={{ color: "red" }}>{deleteError}</p>}
 
                 {showUsers && !loadingUsers && !usersError && (
                     <table 
@@ -383,6 +425,7 @@ function AdminDashboard() {
                                 <th style={thStyle}>Change Role</th>
                                 <th style={thStyle}>Edit User</th>
                                 <th style={thStyle}>Change Password</th>
+                                <th style={thStyle}>Delete</th>
 
                             </tr>
                         </thead>
@@ -501,7 +544,18 @@ function AdminDashboard() {
                                                 Change
                                             </button>
                                         )}
-                                    </td>                   
+                                    </td>  
+                                    <td style={tdStyle}>
+                                        {user.role === "ADMIN" ? (
+                                            <span>-</span>
+                                        ) : (
+                                            <button onClick={() => setDeleteTarget(user)} 
+                                            disabled={deleteLoadingId === user.id}>
+                                                {deleteLoadingId === user.id ? "Deleting..." : "Delete"}
+                                            </button>
+
+                                        )}
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
@@ -520,6 +574,44 @@ function AdminDashboard() {
                     {showUsers ? "Hide Users" : "Show Users"}
                 </button>
             </section>
+
+            {deleteTarget && (
+                <div
+                    style={{
+                    position: "fixed",
+                    inset: 0,
+                    background: "rgba(0,0,0,0.45)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    zIndex: 1000,
+                    }}
+                >
+                    <div
+                        style={{
+                            background: "#fff",
+                            borderRadius: "12px",
+                            padding: "20px",
+                            width: "360px",
+                            boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+                        }}
+                    >
+                        <h3 style={{ marginTop: 0 }}>Delete User</h3>
+                        <p>
+                            Are you sure you want to delete user <strong>{deleteTarget.username}</strong>?
+                        </p>
+                        <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
+                            <button onClick={() => setDeleteTarget(null)}>Cancel</button>
+                            <button
+                                onClick={() => handleDeleteUser(deleteTarget)}
+                                style={{ background: "#dc2626", color: "#fff", border: "none", padding: "8px 12px", borderRadius: "6px" }}
+                            >
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

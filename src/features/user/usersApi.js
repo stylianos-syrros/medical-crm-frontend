@@ -35,4 +35,9 @@ export async function changePassword(userId, payload) {
     return response.data;
 }
 
+export async function deleteUser(userId){
+    const response = await client.delete(`/api/users/${userId}`);
+    return response.data;
+}
+
 

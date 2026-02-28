@@ -8,27 +8,20 @@ import {
     getMyUpcomingAppointments,
     updateMyAppointmentNotes,
     completeMyAppointment,
+    getMyPatients,
+    getMyAppointments,
+    getMyAppointmentsHistory,
+    updateMyDoctorProfile,
 } from "../features/user/doctorApi";
 
 function DoctorDashboard() {
     const navigate = useNavigate();
     const dispatch = useDispatch();
-
-    const handleLogout = () => {
-        dispatch(logout());
-        navigate("/login");
-    }
     
     const [doctor, setDoctor] = useState(null);
-    const [appointments, setAppointments] = useState([]);
-    const [notesById, setNotesById] = useState({});
-
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
-    const [actionLoadingId, setActionLoadingId] = useState(null);
-
     const [needsProfile, setNeedsProfile] = useState(false);
-    const [profileLoading, setProfileLoading] = useState(false);
+    const [isEditingProfile, setIsEditingProfile] = useState(false);
+
     const [profileForm, setProfileForm] = useState({
         firstName: "",
         lastName: "",
@@ -36,16 +29,47 @@ function DoctorDashboard() {
         phone: "",
     });
 
-    const loadAppointments = async () => { 
-        const myAppointments = await getMyUpcomingAppointments();
-        setAppointments(myAppointments);
+    const [patients, setPatients] = useState([]);
+    const [allAppointments, setAllAppointments] = useState([]);
+    const [historyAppointments, setHistoryAppointments] = useState([]);
+    const [upcomingAppointments, setUpcomingAppointments] = useState([]);
+    const [notesById, setNotesById] = useState({});
+
+    const [loading, setLoading] = useState(true);
+    const [actionLoadingId, setActionLoadingId] = useState(null);
+    const [profileLoading, setProfileLoading] = useState(false);
+    const [error, setError] = useState("");
+
+    const handleLogout = () => {
+        dispatch(logout());
+        navigate("/login");
+    }
+
+    const handleProfileChange = (e) =>{
+        setProfileForm((prev) => ({
+            ...prev, [e.target.name]: e.target.value,
+        }));
+    };
+
+    const loadDoctorLists = async() => { 
+        const [patientsData, allData, historyData, upcomingData] = await Promise.all([
+            getMyPatients(),
+            getMyAppointments(),
+            getMyAppointmentsHistory(),
+            getMyUpcomingAppointments(),
+        ]);
+
+        setPatients(patientsData);
+        setAllAppointments(allData);
+        setHistoryAppointments(historyData);
+        setUpcomingAppointments(upcomingData);
 
         const notesMap ={}; 
-        myAppointments.forEach((a) => {
+        upcomingData.forEach((a) => {
             notesMap[a.id] = a.notes || "";
         });
         setNotesById(notesMap);
-    };
+    }
 
     const loadDoctorData = async () => { 
         setLoading(true);
@@ -55,18 +79,28 @@ function DoctorDashboard() {
             const profile = await getMyDoctorProfile();
             setDoctor(profile);
             setNeedsProfile(false);
-            await loadAppointments(); 
+            setIsEditingProfile(false);
+            
+            setProfileForm({
+                firstName: profile.firstName || "",
+                lastName: profile.lastName || "",
+                specialty: profile.specialty || "",
+                phone: profile.phone || "",
+            })
 
+            await loadDoctorLists();
         } catch (error){ 
             if (error.response?.status === 404) {
                 setNeedsProfile(true);
             } else {
-                setError(
+                const msg =
                     error.response?.data?.message ||
-                        error.response?.data ||
-                        error.message ||
-                        "Failed to load doctor data"
-                );
+                    (typeof error.response?.data === "string" ? error.response.data : null) ||
+                    error.message ||
+                    "Request failed";
+
+                setError(msg);
+
             }
         } finally {
             setLoading(false);
@@ -77,11 +111,6 @@ function DoctorDashboard() {
         loadDoctorData();
     },[]);
 
-    const handleProfileChange = (e) =>{
-        setProfileForm((prev) => ({
-            ...prev, [e.target.name]: e.target.value,
-        }));
-    };
 
     const handleCreateProfile = async (e) => {
         e.preventDefault();
@@ -98,33 +127,62 @@ function DoctorDashboard() {
 
             await loadDoctorData();
         } catch (error){
-            setError(
+            const msg =
                     error.response?.data?.message ||
-                        error.response?.data ||
-                        error.message ||
-                        "Failed to load doctor data"
-                );
+                    (typeof error.response?.data === "string" ? error.response.data : null) ||
+                    error.message ||
+                    "Request failed";
+
+            setError(msg);
         } finally {
             setProfileLoading(false);
         }
     };
 
-    const onSaveNotes = async (appointmentId) =>{
-        const notes = notesById[appointmentId] ?? "";
+    const handleUpdateProfile = async (e) => {
+        e.preventDefault();
+        setError("");
+        setProfileLoading(true);
 
+        try{
+            const updated = await updateMyDoctorProfile({
+                firstName: profileForm.firstName.trim(),
+                lastName: profileForm.lastName.trim(),
+                specialty: profileForm.specialty,
+                phone: profileForm.phone.trim(),
+            });
+
+            setDoctor(updated);
+            setIsEditingProfile(false);
+        } catch (error){
+            const msg =
+                    error.response?.data?.message ||
+                    (typeof error.response?.data === "string" ? error.response.data : null) ||
+                    error.message ||
+                    "Request failed";
+
+            setError(msg);
+        } finally {
+            setProfileLoading(false);
+        }
+    }
+
+    const onSaveNotes = async (appointmentId) =>{
         setActionLoadingId(appointmentId);
         setError("");
 
         try {
+            const notes = notesById[appointmentId] ?? "";
             await updateMyAppointmentNotes(appointmentId, notes);
-            await loadAppointments();
+            await loadDoctorLists();
         } catch (error){
-            setError(
-                error.response?.data?.message ||
-                    error.response?.data ||
+            const msg =
+                    error.response?.data?.message ||
+                    (typeof error.response?.data === "string" ? error.response.data : null) ||
                     error.message ||
-                    "Failed to update notes"
-            );
+                    "Request failed";
+
+            setError(msg);
         } finally {
             setActionLoadingId(null);
         }
@@ -136,14 +194,15 @@ function DoctorDashboard() {
 
         try {
             await completeMyAppointment(appointmentId);
-            await loadAppointments();
+            await loadDoctorLists();
         } catch (error){
-            setError(
-                error.response?.data?.message ||
-                    error.response?.data ||
+            const msg =
+                    error.response?.data?.message ||
+                    (typeof error.response?.data === "string" ? error.response.data : null) ||
                     error.message ||
-                    "Failed to complete appointment"
-            );
+                    "Request failed";
+
+            setError(msg);
         }finally {
             setActionLoadingId(null);
         }
@@ -229,21 +288,90 @@ function DoctorDashboard() {
                 <>
                     <section style={{ marginTop: "16px"}}>
                         <h2>My Profile</h2>
-                        <p>
-                            <strong>Name:</strong> {doctor.firstName} {doctor.lastName}
-                        </p>
-                        <p>
-                            <strong>Specialty:</strong> {doctor.specialty}
-                        </p>
-                        <p>
-                            <strong>Phone:</strong> {doctor.phone}
-                        </p>
+
+                        {!isEditingProfile ? (
+                            <>
+                                <p>
+                                    <strong>Name:</strong> {doctor.firstName} {doctor.lastName}
+                                </p>
+                                <p>
+                                    <strong>Specialty:</strong> {doctor.specialty}
+                                </p>
+                                <p>
+                                    <strong>Phone:</strong> {doctor.phone}
+                                </p>
+                                <button onClick={() => setIsEditingProfile(true)}>
+                                    Edit Profile
+                                </button>
+                            </>
+                        ) : (
+                            <form onSubmit={handleUpdateProfile}>
+                                <div style={{ marginBottom: "10px" }}>
+                                    <label>First Name</label>
+                                    <input
+                                        name="firstName"
+                                        value={profileForm.firstName}
+                                        onChange={handleProfileChange}
+                                        style={{ width: "100%", padding: "8px" }}
+                                        required
+                                    />
+                                </div>
+
+                                <div style={{ marginBottom: "10px" }}>
+                                    <label>Last Name</label>
+                                    <input
+                                        name="lastName"
+                                        value={profileForm.lastName}
+                                        onChange={handleProfileChange}
+                                        style={{ width: "100%", padding: "8px" }}
+                                        required
+                                    />
+                                </div>
+
+                                <div style ={{ marginBottom: "10px"}}>
+                                    <label>Specialty</label>
+                                    <select
+                                        name = "specialty"
+                                        value = {profileForm.specialty}
+                                        onChange = {handleProfileChange}
+                                        style = {{ width: "100%", padding: "8px" }}
+                                        required
+                                    >
+                                        <option value="" disabled>Select Specialty</option>
+                                        <option value="CARDIOLOGY">Cardiology</option>
+                                        <option value="DERMATOLOGY">Dermatology</option>
+                                        <option value="NEUROLOGY">Neurology</option>
+                                        <option value="ORTHOPEDICS">Orthopedics</option>
+                                        <option value="PEDIATRICS">Pediatrics</option>
+                                        <option value="PSYCHIATRY">Psychiatry</option>
+                                    </select>
+                                </div>
+
+                                <div style ={{marginBottom: "10px"}}>
+                                    <label>Phone</label>
+                                    <input
+                                        name = "phone"
+                                        value = {profileForm.phone}
+                                        onChange = {handleProfileChange}
+                                        style = {{ width: "100%", padding: "8px" }}
+                                        required
+                                    />
+                                </div>
+
+                                <button type="submit" disabled={profileLoading} style={{ marginRight: "8px" }}>
+                                    {profileLoading ? "Saving..." : "Save"}
+                                </button>
+                                <button type="button" onClick={() => setIsEditingProfile(false)}>
+                                    Cancel
+                                </button>
+                            </form>
+                        )}
                     </section>
 
                     <section style={{ marginTop: "24px"}}>
                         <h2>Upcoming Appointments</h2>
 
-                        {appointments.length === 0 ? (
+                        {upcomingAppointments.length === 0 ? (
                             <p>No upcoming appointments.</p>
                         ) : (
                             <table 
@@ -264,7 +392,7 @@ function DoctorDashboard() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {appointments.map((a) => (
+                                    {upcomingAppointments.map((a) => (
                                         <tr key={a.id}>
                                             <td>{a.id}</td>
                                             <td>{a.appointmentDate}</td>
@@ -299,6 +427,72 @@ function DoctorDashboard() {
                                                     {actionLoadingId === a.id ? "Completing..." : "Complete"}
                                                 </button>
                                             </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </section>
+
+                    <section style ={{marginTop: "24px"}}>
+                        <h2>Appointment HIstory</h2>
+                        {historyAppointments.length === 0? (
+                            <p>No completed appointments yet.</p>
+                        ) : (
+                            <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%" }}>
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Date</th>
+                                        <th>Time</th>
+                                        <th>Status</th>
+                                        <th>Patient</th>
+                                        <th>Service</th>
+                                        <th>Notes</th>
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                    {historyAppointments.map((a) => (
+                                        <tr key={a.id}>
+                                        <td>{a.id}</td>
+                                        <td>{a.appointmentDate}</td>
+                                        <td>{a.appointmentTime}</td>
+                                        <td>{a.status}</td>
+                                        <td>{a.patientName || a.patientId}</td>
+                                        <td>{a.serviceName || a.serviceId}</td>
+                                        <td>{a.notes || "-"}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </section>
+                    
+                    <section style={{ marginTop: "24px", marginBottom: "24px" }}>
+                        <h2>My Patients</h2>
+                        {patients.length === 0 ? (
+                            <p>No patients found.</p>
+                        ) : (
+                            <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%" }}>
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>First Name</th>
+                                        <th>Last Name</th>
+                                        <th>Phone</th>
+                                        <th>Date Of Birth</th>
+                                        <th>Notes</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {patients.map((p) => (
+                                        <tr key={p.id}>
+                                            <td>{p.id}</td>
+                                            <td>{p.firstName}</td>
+                                            <td>{p.lastName}</td>
+                                            <td>{p.phone}</td>
+                                            <td>{p.dateOfBirth}</td>
+                                            <td>{p.notes || "-"}</td>
                                         </tr>
                                     ))}
                                 </tbody>
