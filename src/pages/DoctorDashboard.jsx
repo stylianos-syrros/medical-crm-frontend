@@ -5,14 +5,16 @@ import { useState, useEffect} from "react";
 import {
     createMyDoctorProfile,
     getMyDoctorProfile,
-    getMyUpcomingAppointments,
-    updateMyAppointmentNotes,
-    completeMyAppointment,
     getMyPatients,
-    getMyAppointments,
-    getMyAppointmentsHistory,
     updateMyDoctorProfile,
 } from "../features/user/doctorApi";
+import {
+  getDoctorUpcomingAppointments,
+  getDoctorAppointmentsHistory,
+  updateDoctorAppointmentNotes,
+  completeDoctorAppointment,
+} from "../features/user/appointmentApi";
+
 
 function DoctorDashboard() {
     const navigate = useNavigate();
@@ -30,7 +32,6 @@ function DoctorDashboard() {
     });
 
     const [patients, setPatients] = useState([]);
-    const [allAppointments, setAllAppointments] = useState([]);
     const [historyAppointments, setHistoryAppointments] = useState([]);
     const [upcomingAppointments, setUpcomingAppointments] = useState([]);
     const [notesById, setNotesById] = useState({});
@@ -52,15 +53,13 @@ function DoctorDashboard() {
     };
 
     const loadDoctorLists = async() => { 
-        const [patientsData, allData, historyData, upcomingData] = await Promise.all([
+        const [patientsData, historyData, upcomingData] = await Promise.all([
             getMyPatients(),
-            getMyAppointments(),
-            getMyAppointmentsHistory(),
-            getMyUpcomingAppointments(),
+            getDoctorAppointmentHistory(),
+            getDoctorUpcomingAppointments(),
         ]);
 
         setPatients(patientsData);
-        setAllAppointments(allData);
         setHistoryAppointments(historyData);
         setUpcomingAppointments(upcomingData);
 
@@ -173,7 +172,7 @@ function DoctorDashboard() {
 
         try {
             const notes = notesById[appointmentId] ?? "";
-            await updateMyAppointmentNotes(appointmentId, notes);
+            await updateDoctorAppointmentNotes(appointmentId, notes);
             await loadDoctorLists();
         } catch (error){
             const msg =
@@ -193,7 +192,7 @@ function DoctorDashboard() {
         setError("");
 
         try {
-            await completeMyAppointment(appointmentId);
+            await completeDoctorAppointment(appointmentId);
             await loadDoctorLists();
         } catch (error){
             const msg =

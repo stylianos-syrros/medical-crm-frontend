@@ -67,3 +67,14 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+.dob-wrapper {
+  width: 100%;
+}
+
+.dob-input {
+  width: 100%;
+  padding: 8px;
+  box-sizing: border-box;
+}
+

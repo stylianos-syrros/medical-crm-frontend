@@ -20,12 +20,12 @@ export async function getMyPatients() {
   return response.data;
 }
 
-export async function getMyAppointments() {
+export async function getMyAppointments() { ///
   const response = await client.get("/api/doctors/me/appointments");
   return response.data;
 }
 
-export async function getMyAppointmentsHistory() {
+export async function getMyAppointmentsHistory() { ///
   const response = await client.get("/api/doctors/me/appointments/history");
   return response.data;
 }

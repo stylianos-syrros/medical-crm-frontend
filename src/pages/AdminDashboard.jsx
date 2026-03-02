@@ -1,7 +1,7 @@
 import { useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { logout } from "../features/auth/authSlice";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createUser, 
     getAllUsers, 
     enableUser, 
@@ -11,6 +11,12 @@ import { createUser,
     changePassword,
     deleteUser,
 } from "../features/user/usersApi"; 
+import {
+    createMedicalService,
+    deleteMedicalService,
+    getAllMedicalServices,
+    updateMedicalService,
+} from "../features/user/medicalServiceApi";
 
 function AdminDashboard() {
     const navigate = useNavigate();
@@ -20,6 +26,15 @@ function AdminDashboard() {
         dispatch(logout());
         navigate("/login");
     };
+
+    const getErrorMessage = (error, fallback) =>
+        error.response?.data?.message ||
+        (typeof error.response?.data === "string" ? error.response.data : null) ||
+        (error.response?.data && typeof error.response?.data === "object"
+            ? Object.values(error.response.data).flat().join(" | ")
+            : null) ||
+        error.message ||
+        fallback;
 
 
 
@@ -262,7 +277,7 @@ function AdminDashboard() {
 
     const [deleteLoadingId, setDeleteLoadingId] = useState(null);
     const [deleteError, setDeleteError] = useState("");
-    const [deleteTarget, setDeleteTarget] = useState(null); // user object or null
+    const [deleteTarget, setDeleteTarget] = useState(null); 
 
     const handleDeleteUser = async (user) => {
         if (user.role === "ADMIN") {
@@ -286,6 +301,138 @@ function AdminDashboard() {
         } finally {
             setDeleteLoadingId(null);
             setDeleteTarget(null);
+        }
+    };
+
+
+
+    const [services, setServices] = useState([]);
+    const [servicesLoading, setServicesLoading] = useState(false);
+    const [servicesError, setServicesError] = useState("");
+    const [serviceActionLoadingId, setServiceActionLoadingId] = useState(null);
+
+    const [serviceCreateForm, setServiceCreateForm] = useState({
+        name: "",
+        description: "",
+        price: "",
+        duration: "",
+    });
+    const [serviceCreateLoading, setServiceCreateLoading] = useState(false);
+    const [serviceCreateError, setServiceCreateError] = useState("");
+    const [serviceCreateSuccess, setServiceCreateSuccess] = useState("");
+
+    const [editingServiceId, setEditingServiceId] = useState(null);
+    const [serviceEditForm, setServiceEditForm] = useState({
+        name: "",
+        description: "",
+        price: "",
+        duration: "",
+    });
+    const [serviceEditError, setServiceEditError] = useState("");
+    const [showServices, setShowServices] = useState(false);
+
+    const loadMedicalServices = async () => {
+        setServicesLoading(true);
+        setServicesError("");
+        try {
+            const data = await getAllMedicalServices();
+            setServices(data);
+        } catch (error) {
+            setServicesError(getErrorMessage(error, "Failed to load medical services"));
+        } finally {
+            setServicesLoading(false);
+        }
+    };
+
+    const handleServiceCreateChange = (e) => {
+        setServiceCreateForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+    };
+
+    const handleCreateMedicalService = async (e) => {
+        e.preventDefault();
+        setServiceCreateError("");
+        setServicesError("");
+        setServiceCreateSuccess("");
+        setServiceCreateLoading(true);
+
+        try {
+            await createMedicalService({
+                name: serviceCreateForm.name.trim(),
+                description: serviceCreateForm.description.trim(),
+                price: Number(serviceCreateForm.price),
+                duration: Number(serviceCreateForm.duration),
+            });
+
+            setServiceCreateSuccess("Medical service created successfully");
+            setServiceCreateForm({ name: "", description: "", price: "", duration: "" });
+            await loadMedicalServices();
+        } catch (error) {
+            setServiceCreateError(getErrorMessage(error, "Failed to create medical service"));
+        } finally {
+            setServiceCreateLoading(false);
+        }
+    };
+
+    const startEditService = (service) => {
+        setServiceCreateSuccess("");
+        setServicesError("");
+        setServiceCreateError("");
+        setEditingServiceId(service.id);
+        setServiceEditForm({
+            name: service.name || "",
+            description: service.description || "",
+            price: service.price ?? "",
+            duration: service.duration ?? "",
+        });
+    };
+
+    const cancelEditService = () => {
+        setEditingServiceId(null);
+        setServiceEditForm({ name: "", description: "", price: "", duration: "" });
+    };
+
+    const handleServiceEditChange = (e) => {
+        setServiceEditForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+    };
+
+    const saveEditService = async (serviceId) => {
+        setServiceEditError("");
+        setServicesError("");
+        setServiceCreateError("");
+        setServiceCreateSuccess("");
+        setServiceActionLoadingId(serviceId);
+
+        try {
+            await updateMedicalService(serviceId, {
+                name: serviceEditForm.name.trim(),
+                description: serviceEditForm.description.trim(),
+                price: Number(serviceEditForm.price),
+                duration: Number(serviceEditForm.duration),
+            });
+            setServiceCreateSuccess("Medical service updated successfully");
+            await loadMedicalServices();
+            cancelEditService();
+        } catch (error) {
+            setServiceEditError(getErrorMessage(error, "Failed to update medical service"));
+        } finally {
+            setServiceActionLoadingId(null);
+        }
+    };
+
+    const handleDeleteMedicalService = async (serviceId) => {
+        setServiceEditError("");
+        setServicesError("");
+        setServiceCreateError("");
+        setServiceCreateSuccess("");
+        setServiceActionLoadingId(serviceId);
+        try {
+            await deleteMedicalService(serviceId);
+            setServiceCreateSuccess("Medical service deleted successfully");
+            await loadMedicalServices();
+        } catch (error) {
+            setServicesError(getErrorMessage(error, "Failed to delete medical service"));
+        } finally {
+            setServiceActionLoadingId(null);
         }
     };
 
@@ -430,7 +577,19 @@ function AdminDashboard() {
                             </tr>
                         </thead>
                         <tbody>
-                            {users.map((user) => (
+                            {users.map((user) => {
+                                const targetRole = user.role === "DOCTOR" ? "PATIENT" : "DOCTOR";
+                                const hasLockedProfile =
+                                    (user.role === "DOCTOR" && !!user.hasDoctorProfile) ||
+                                    (user.role === "PATIENT" && !!user.hasPatientProfile);
+
+                                const roleChangeDisabled =
+                                    roleChangingId === user.id ||
+                                    actionLoadingId === user.id ||
+                                    !user.enabled ||
+                                    hasLockedProfile;
+
+                                return (
                                 <tr key={user.id}>
                                     <td style={tdStyle}>{user.id}</td>
                                     <td style={tdStyle}>{user.username}</td>
@@ -455,20 +614,24 @@ function AdminDashboard() {
                                         ) : (
                                             <button
                                                 onClick={() =>
-                                                    handleRoleChanged(
-                                                        user,
-                                                        user.role === "DOCTOR" ? "PATIENT" : "DOCTOR"
-                                                    )
+                                                    handleRoleChanged(user, targetRole)
                                                 }
-                                                disabled={roleChangingId === user.id || !user.enabled}
-                                                style={!user.enabled ? disabledButtonStyle : undefined}
+                                                disabled={roleChangeDisabled}
+                                                style={roleChangeDisabled ? disabledButtonStyle : undefined}
+                                                title={
+                                                    hasLockedProfile
+                                                        ? `Cannot change role: user already has a ${user.role} profile`
+                                                        : ""
+                                                }
 
                                             >
                                                 {!user.enabled
                                                     ? "Unavailable"
                                                     : roleChangingId === user.id
                                                     ? "Changing..."
-                                                    : `Change to ${user.role === "DOCTOR" ? "PATIENT" : "DOCTOR"}`}
+                                                    : hasLockedProfile
+                                                    ? "Role Locked"
+                                                    : `Change to ${targetRole}`}
                                             </button>
                                         )}
                                     </td>
@@ -557,7 +720,8 @@ function AdminDashboard() {
                                         )}
                                     </td>
                                 </tr>
-                            ))}
+                                );
+                            })}
                         </tbody>
                     </table>
                 )}
@@ -612,6 +776,190 @@ function AdminDashboard() {
                     </div>
                 </div>
             )}
+
+            <section style={{ marginTop: "28px" }}>
+                <h2>Create New Medical Service</h2>
+
+                <form onSubmit={handleCreateMedicalService} style={{ maxWidth: "520px", marginBottom: "16px" }}>
+                    <div style={{ marginBottom: "10px" }}>
+                        <label>Name</label>
+                        <input
+                            name="name"
+                            value={serviceCreateForm.name}
+                            onChange={handleServiceCreateChange}
+                            required
+                            style={{ width: "100%", padding: "8px" }}
+                        />
+                    </div>
+
+                    <div style={{ marginBottom: "10px" }}>
+                        <label>Description</label>
+                        <input
+                            name="description"
+                            value={serviceCreateForm.description}
+                            onChange={handleServiceCreateChange}
+                            style={{ width: "100%", padding: "8px" }}
+                        />
+                    </div>
+
+                    <div style={{ marginBottom: "10px" }}>
+                        <label>Price (USD)</label>
+                        <input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            name="price"
+                            value={serviceCreateForm.price}
+                            onChange={handleServiceCreateChange}
+                            required
+                            style={{ width: "100%", padding: "8px" }}
+                        />
+                    </div>
+
+                    <div style={{ marginBottom: "10px" }}>
+                        <label>Duration (minutes)</label>
+                        <input
+                            type="number"
+                            min="1"
+                            name="duration"
+                            value={serviceCreateForm.duration}
+                            onChange={handleServiceCreateChange}
+                            required
+                            style={{ width: "100%", padding: "8px" }}
+                        />
+                    </div>
+
+                    <button type="submit" disabled={serviceCreateLoading}>
+                        {serviceCreateLoading ? "Creating..." : "Create Medical Service"}
+                    </button>
+                </form>
+            </section>
+
+            <section style={{ marginTop: "28px" }}> 
+                <h2>Medical Services</h2>
+
+                {showServices && serviceCreateError && <p style={{ color: "red" }}>{serviceCreateError}</p>}
+                {showServices && serviceCreateSuccess && <p style={{ color: "green" }}>{serviceCreateSuccess}</p>}
+                {showServices && servicesError && <p style={{ color: "red" }}>{servicesError}</p>}
+                {showServices && serviceEditError && <p style={{ color: "red" }}>{serviceEditError}</p>}
+
+                {showServices && (
+                    servicesLoading ? (
+                        <p>Loading medical services...</p>
+                    ) : (
+                        <table
+                            border="2"
+                            cellPadding="8"
+                            style={{
+                                width: "100%",
+                                maxWidth: "1450px",
+                                borderCollapse: "collapse",
+                                tableLayout: "fixed",
+                                marginTop: "8px",
+                            }}
+                        >
+                            <thead>
+                                <tr>
+                                    <th style={thStyle}>ID</th>
+                                    <th style={thStyle}>Name</th>
+                                    <th style={thStyle}>Description</th>
+                                    <th style={thStyle}>Price (USD)</th>
+                                    <th style={thStyle}>Duration (minutes)</th>
+                                    <th style={thStyle}>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {services.map((service) => (
+                                    <tr key={service.id}>
+                                        <td style={tdStyle}>{service.id}</td>
+                                        {editingServiceId === service.id ? (
+                                            <>
+                                                <td style={tdStyle}>
+                                                    <input
+                                                        name="name"
+                                                        value={serviceEditForm.name}
+                                                        onChange={handleServiceEditChange}
+                                                        style={{ width: "100%" }}
+                                                    />
+                                                </td>
+                                                <td style={tdStyle}>
+                                                    <input
+                                                        name="description"
+                                                        value={serviceEditForm.description}
+                                                        onChange={handleServiceEditChange}
+                                                        style={{ width: "100%" }}
+                                                    />
+                                                </td>
+                                                <td style={tdStyle}>
+                                                    <input
+                                                        type="number"
+                                                        step="0.01"
+                                                        min="0.01"
+                                                        name="price"
+                                                        value={serviceEditForm.price}
+                                                        onChange={handleServiceEditChange}
+                                                        style={{ width: "100%" }}
+                                                    />
+                                                </td>
+                                                <td style={tdStyle}>
+                                                    <input
+                                                        type="number"
+                                                        min="1"
+                                                        name="duration"
+                                                        value={serviceEditForm.duration}
+                                                        onChange={handleServiceEditChange}
+                                                        style={{ width: "100%" }}
+                                                    />
+                                                </td>
+                                                <td style={tdStyle}>
+                                                    <button
+                                                        onClick={() => saveEditService(service.id)}
+                                                        disabled={serviceActionLoadingId === service.id}
+                                                    >
+                                                        {serviceActionLoadingId === service.id ? "Saving..." : "Save"}
+                                                    </button>
+                                                    <button style={{ marginLeft: "6px" }} onClick={cancelEditService}>
+                                                        Cancel
+                                                    </button>
+                                                </td>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <td style={tdStyle}>{service.name}</td>
+                                                <td style={tdStyle}>{service.description || "-"}</td>
+                                                <td style={tdStyle}>{service.price}</td>
+                                                <td style={tdStyle}>{service.duration}</td>
+                                                <td style={tdStyle}>
+                                                    <button onClick={() => startEditService(service)}>Edit</button>
+                                                    <button
+                                                        style={{ marginLeft: "6px" }}
+                                                        onClick={() => handleDeleteMedicalService(service.id)}
+                                                        disabled={serviceActionLoadingId === service.id}
+                                                    >
+                                                        {serviceActionLoadingId === service.id ? "Deleting..." : "Delete"}
+                                                    </button>
+                                                </td>
+                                            </>
+                                        )}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )
+                )}
+                <button 
+                onClick={async ()=>{
+                    const next = !showServices;
+                    setShowServices(next);
+                    if (next){
+                        await loadMedicalServices();
+                    }
+                 }}
+
+                 >
+                    {showServices ? "Hide Medical Services" : "Show Medical Services"}
+                </button>
+            </section>
         </div>
     );
 }
