@@ -17,11 +17,16 @@ import {
     getAllMedicalServices,
     updateMedicalService,
 } from "../features/user/medicalServiceApi";
+import { getAllAppointments } from "../features/user/appointmentApi";
 import { extractApiErrorMessage } from "../utils/errors";
+import { isValidEmail } from "../utils/forms";
+import { getAnchoredActionMessageStyle, useAnchoredActionMessage } from "../utils/actionMessage";
 
 function AdminDashboard() {
     const navigate = useNavigate();
     const dispatch = useDispatch();
+    const { anchor, message, captureActionAnchor, showActionMessage, clearActionMessage } =
+        useAnchoredActionMessage();
 
     const handleLogout = () => {
         dispatch(logout());
@@ -50,12 +55,19 @@ function AdminDashboard() {
         e.preventDefault();
         setCreateError("");
         setCreateSuccess("");
+
+        const normalizedEmail = createForm.email.trim();
+        if (!isValidEmail(normalizedEmail)) {
+            setCreateError("Please type a correct email");
+            return;
+        }
+
         setCreateLoading(true);
 
         try {
             const payload = {
                 username: createForm.username.trim(),
-                email: createForm.email.trim(),
+                email: normalizedEmail,
                 password: createForm.password,
                 role: createForm.role,
             };
@@ -84,14 +96,33 @@ function AdminDashboard() {
     const [showUsers, setShowUsers] = useState(false);
     const [loadingUsers, setLoadingUsers] = useState(true);
     const [usersError, setUsersError] = useState("");
+    const [doctorProfileIdsWithAppointments, setDoctorProfileIdsWithAppointments] = useState(
+        new Set()
+    );
+    const [patientProfileIdsWithAppointments, setPatientProfileIdsWithAppointments] = useState(
+        new Set()
+    );
 
     const loadUsers = async () => {
         setLoadingUsers(true);
         setUsersError("");
 
         try {
-            const data = await getAllUsers();
+            const [data, appointments] = await Promise.all([getAllUsers(), getAllAppointments()]);
             setUsers(data);
+
+            const linkedDoctorProfileIds = new Set();
+            const linkedPatientProfileIds = new Set();
+            (appointments || []).forEach((appointment) => {
+                if (appointment?.doctorId !== undefined && appointment?.doctorId !== null) {
+                    linkedDoctorProfileIds.add(Number(appointment.doctorId));
+                }
+                if (appointment?.patientId !== undefined && appointment?.patientId !== null) {
+                    linkedPatientProfileIds.add(Number(appointment.patientId));
+                }
+            });
+            setDoctorProfileIdsWithAppointments(linkedDoctorProfileIds);
+            setPatientProfileIdsWithAppointments(linkedPatientProfileIds);
         } catch (error){
             setUsersError(extractApiErrorMessage(error, "Failed to load users"));
         }
@@ -182,11 +213,18 @@ function AdminDashboard() {
 
     const saveEditUser = async (userId) => {
         setEditError("");
+
+        const normalizedEmail = editForm.email.trim();
+        if (!isValidEmail(normalizedEmail)) {
+            setEditError("Please type a correct email");
+            return;
+        }
+
         setEditLoading(true);
         try {
             await updateUser(userId, {
                 username: editForm.username.trim(),
-                email: editForm.email.trim(),
+                email: normalizedEmail,
             });
             await loadUsers();
             cancelEditUser();
@@ -247,9 +285,35 @@ function AdminDashboard() {
     const [deleteError, setDeleteError] = useState("");
     const [deleteTarget, setDeleteTarget] = useState(null); 
 
+    const userHasAppointments = (user) => {
+        if (!user) return false;
+
+        if (user.role === "DOCTOR") {
+            const doctorProfileId = Number(user.doctorProfileId);
+            return (
+                !!user.hasDoctorProfile &&
+                Number.isFinite(doctorProfileId) &&
+                doctorProfileIdsWithAppointments.has(doctorProfileId)
+            );
+        }
+        if (user.role === "PATIENT") {
+            const patientProfileId = Number(user.patientProfileId);
+            return (
+                !!user.hasPatientProfile &&
+                Number.isFinite(patientProfileId) &&
+                patientProfileIdsWithAppointments.has(patientProfileId)
+            );
+        }
+        return false;
+    };
+
     const handleDeleteUser = async (user) => {
         if (user.role === "ADMIN") {
             setDeleteError("Cannot delete admin user");
+            return;
+        }
+        if (userHasAppointments(user)) {
+            setDeleteError("Cannot delete user with appointments. Disable the account instead");
             return;
         }
 
@@ -293,6 +357,48 @@ function AdminDashboard() {
     });
     const [serviceEditError, setServiceEditError] = useState("");
     const [showServices, setShowServices] = useState(false);
+
+    const clearAllMessages = () => {
+        setCreateError("");
+        setCreateSuccess("");
+        setUsersError("");
+        setActionError("");
+        setRoleError("");
+        setEditError("");
+        setPasswordError("");
+        setPasswordSuccess("");
+        setDeleteError("");
+        setServiceCreateError("");
+        setServiceCreateSuccess("");
+        setServiceEditError("");
+        setServicesError("");
+        clearActionMessage();
+    };
+
+    const handlePageClickCapture = (e) => {
+        const didClickButton = captureActionAnchor(e);
+        if (!didClickButton) return;
+        clearAllMessages();
+    };
+
+    const successMessage = createSuccess || passwordSuccess || serviceCreateSuccess;
+    const errorMessage =
+        createError ||
+        usersError ||
+        actionError ||
+        roleError ||
+        editError ||
+        passwordError ||
+        deleteError ||
+        serviceCreateError ||
+        serviceEditError ||
+        servicesError;
+
+    useEffect(() => {
+        if (errorMessage) {
+            showActionMessage(errorMessage, "error");
+        }
+    }, [errorMessage]);
 
     const loadMedicalServices = async () => {
         setServicesLoading(true);
@@ -425,8 +531,14 @@ function AdminDashboard() {
     };
 
     return (
-        <div style={{ padding: '24px' }}>
+        <div style={{ padding: '24px' }} onClickCapture={handlePageClickCapture}>
             <h1>Admin Dashboard</h1>
+            {message?.text && (
+                <div style={getAnchoredActionMessageStyle(message.type, anchor)}>
+                    {message.text}
+                </div>
+            )}
+            {successMessage && <p style={{ color: "green" }}>{successMessage}</p>}
 
             <button onClick={handleLogout} style={{ marginBottom: "20px"}}> 
                 Logout
@@ -498,26 +610,12 @@ function AdminDashboard() {
                     </button>
                 </form>
 
-                {createError && (
-                    <p style={{ color:"red", marginTop: "10px"}}>{createError}</p>
-                )}
-                {createSuccess && (
-                    <p style={{ color: "green", marginTop: "10px" }}>{createSuccess}</p>
-                )}
             </section>
 
             <section>
                 <h2>Users</h2>
 
                 {showUsers && loadingUsers && <p>Loading users...</p>}
-                {showUsers && usersError && <p style={{ color:"red" }}>{usersError}</p>}
-                {actionError && <p style={{ color: "red" }}>{actionError}</p>}
-                {roleError && <p style={{ color:"red" }}>{roleError} </p>}
-                {editError && <p style={{ color: "red" }}>{editError}</p>}
-                {passwordError && <p style={{ color: "red" }}>{passwordError}</p>}
-                {passwordSuccess && <p style={{ color: "green" }}>{passwordSuccess}</p>}
-                {deleteError && <p style={{ color: "red" }}>{deleteError}</p>}
-
                 {showUsers && !loadingUsers && !usersError && (
                     <table 
                         border="2"
@@ -536,7 +634,6 @@ function AdminDashboard() {
                                 <th style={thStyle}>Username</th>
                                 <th style={thStyle}>Email</th>
                                 <th style={thStyle}>Role</th>
-                                <th style={thStyle}>Enabled</th>
                                 <th style={thStyle}>Enable/Disable</th>
                                 <th style={thStyle}>Change Role</th>
                                 <th style={thStyle}>Edit User</th>
@@ -551,6 +648,9 @@ function AdminDashboard() {
                                 const hasLockedProfile =
                                     (user.role === "DOCTOR" && !!user.hasDoctorProfile) ||
                                     (user.role === "PATIENT" && !!user.hasPatientProfile);
+                                const hasAppointments = userHasAppointments(user);
+                                const deleteDisabled =
+                                    deleteLoadingId === user.id || hasAppointments;
 
                                 const roleChangeDisabled =
                                     roleChangingId === user.id ||
@@ -564,7 +664,6 @@ function AdminDashboard() {
                                     <td style={tdStyle}>{user.username}</td>
                                     <td style={tdStyle}>{user.email}</td>
                                     <td style={tdStyle}>{user.role}</td>
-                                    <td style={tdStyle}>{user.enabled ? "Yes" : "No"}</td>
                                     <td style={tdStyle}>
                                         {user.role === "ADMIN" ? (
                                             <span>-</span>
@@ -617,6 +716,7 @@ function AdminDashboard() {
                                                 />
                                                 <input
                                                     name="email"
+                                                    type="email"
                                                     value={editForm.email}
                                                     onChange={handleEditChange}
                                                     style={{ marginBottom: "6px", width: "100%" }}
@@ -681,10 +781,26 @@ function AdminDashboard() {
                                         {user.role === "ADMIN" ? (
                                             <span>-</span>
                                         ) : (
-                                            <button onClick={() => setDeleteTarget(user)} 
-                                            disabled={deleteLoadingId === user.id}>
-                                                {deleteLoadingId === user.id ? "Deleting..." : "Delete"}
-                                            </button>
+                                            <span
+                                                title={
+                                                    hasAppointments
+                                                        ? "Cannot delete user with appointments. Disable the account instead."
+                                                        : ""
+                                                }
+                                                style={{ display: "inline-block" }}
+                                            >
+                                                <button
+                                                    onClick={() => setDeleteTarget(user)}
+                                                    disabled={deleteDisabled}
+                                                    style={
+                                                        deleteDisabled
+                                                            ? disabledButtonStyle
+                                                            : undefined
+                                                    }
+                                                >
+                                                    {deleteLoadingId === user.id ? "Deleting..." : "Delete"}
+                                                </button>
+                                            </span>
 
                                         )}
                                     </td>
@@ -806,11 +922,6 @@ function AdminDashboard() {
 
             <section style={{ marginTop: "28px" }}> 
                 <h2>Medical Services</h2>
-
-                {showServices && serviceCreateError && <p style={{ color: "red" }}>{serviceCreateError}</p>}
-                {showServices && serviceCreateSuccess && <p style={{ color: "green" }}>{serviceCreateSuccess}</p>}
-                {showServices && servicesError && <p style={{ color: "red" }}>{servicesError}</p>}
-                {showServices && serviceEditError && <p style={{ color: "red" }}>{serviceEditError}</p>}
 
                 {showServices && (
                     servicesLoading ? (

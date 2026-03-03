@@ -8,6 +8,7 @@ import {
     getMyPatients,
     updateMyDoctorProfile,
 } from "../features/user/doctorApi";
+import { changeMyPassword } from "../features/user/adminApi";
 import {
   getDoctorUpcomingAppointments,
   getDoctorAppointmentsHistory,
@@ -15,18 +16,21 @@ import {
   updateDoctorAppointmentNotes,
   completeDoctorAppointment,
   cancelDoctorAppointment,
-  getDoctorPaidAppointments,
 } from "../features/user/appointmentApi";
+import { getMyDoctorPaidAppointments, getMyDoctorUnpaidAppointments } from "../features/user/paymentApi";
 import { extractApiErrorMessage } from "../utils/errors";
 import { sortAppointmentsByDateTime } from "../utils/appointments";
-import { formatTimeHHmm } from "../utils/dateTime";
+import { formatDateDDMMYYYY, formatTimeHHmm, isFutureAppointment } from "../utils/dateTime";
 import { normalizeStatus } from "../utils/status";
 import { getDefaultDoctorProfileForm } from "../utils/forms";
+import { getAnchoredActionMessageStyle, useAnchoredActionMessage } from "../utils/actionMessage";
 
 
 function DoctorDashboard() {
     const navigate = useNavigate();
     const dispatch = useDispatch();
+    const { anchor, message, captureActionAnchor, showActionMessage, clearActionMessage } =
+        useAnchoredActionMessage();
     
     const [doctor, setDoctor] = useState(null);
     const [needsProfile, setNeedsProfile] = useState(false);
@@ -42,14 +46,19 @@ function DoctorDashboard() {
     const [loading, setLoading] = useState(true);
     const [actionLoadingId, setActionLoadingId] = useState(null);
     const [profileLoading, setProfileLoading] = useState(false);
+    const [passwordLoading, setPasswordLoading] = useState(false);
     const [error, setError] = useState("");
     const [editingNotesId, setEditingNotesId] = useState(null);
+    const [isChangingPassword, setIsChangingPassword] = useState(false);
+    const [passwordForm, setPasswordForm] = useState({ oldPassword: "", newPassword: "" });
     const [showUpcomingAppointments, setShowUpcomingAppointments] = useState(false);
     const [showAppointmentsHistory, setShowAppointmentsHistory] = useState(false);
     const [showMyPatients, setShowMyPatients] = useState(false);
     const [showAllAppointments, setShowAllAppointments] = useState(false);
     const [paidAppointmentIds, setPaidAppointmentIds] = useState(new Set());
+    const [appointmentsWithPayments, setAppointmentsWithPayments] = useState(new Set());
     const [hoveredUnpaidHistoryId, setHoveredUnpaidHistoryId] = useState(null);
+    const [hoveredPaidUpcomingCancelId, setHoveredPaidUpcomingCancelId] = useState(null);
 
     const [filteredAppointments, setFilteredAppointments] = useState([]);
     const [statusFilter, setStatusFilter] = useState("NONE");
@@ -64,6 +73,13 @@ function DoctorDashboard() {
         navigate("/login");
     }
 
+    const handlePageClickCapture = (e) => {
+        const didClickButton = captureActionAnchor(e);
+        if (!didClickButton) return;
+        setError("");
+        clearActionMessage();
+    };
+
     const handleProfileChange = (e) =>{
         setProfileForm((prev) => ({
             ...prev, [e.target.name]: e.target.value,
@@ -71,20 +87,29 @@ function DoctorDashboard() {
     };
 
     const loadDoctorLists = async() => { 
-        const [patientsData, historyData, upcomingData, paidData] = await Promise.all([
+        const [patientsData, historyData, upcomingData, paidData, unpaidData] = await Promise.all([
             getMyPatients(),
             getDoctorAppointmentsHistory(),
             getDoctorUpcomingAppointments(),
-            getDoctorPaidAppointments(),
+            getMyDoctorPaidAppointments(),
+            getMyDoctorUnpaidAppointments(),
         ]);
 
         setPatients(patientsData);
         setHistoryAppointments(historyData);
         setUpcomingAppointments(upcomingData);
-        setPaidAppointmentIds(new Set((paidData || []).map((a) => a.id)));
+        setPaidAppointmentIds(new Set((paidData || []).map((a) => Number(a.id))));
+        const hasAnyPaymentIds = new Set((paidData || []).map((a) => Number(a.id)));
+        (unpaidData || []).forEach((a) => {
+            const totalPaid = Number(a.totalPaid ?? a.paidAmount ?? a.amountPaid ?? 0);
+            if (Number.isFinite(totalPaid) && totalPaid > 0) {
+                hasAnyPaymentIds.add(Number(a.id));
+            }
+        });
+        setAppointmentsWithPayments(hasAnyPaymentIds);
 
         const notesMap ={}; 
-        upcomingData.forEach((a) => {
+        [...upcomingData, ...historyData].forEach((a) => {
             notesMap[a.id] = a.doctorNotes || "";
         });
         setNotesById(notesMap);
@@ -123,6 +148,12 @@ function DoctorDashboard() {
     useEffect(() => {
         loadDoctorData();
     },[]);
+
+    useEffect(() => {
+        if (error) {
+            showActionMessage(error, "error");
+        }
+    }, [error]);
 
     useEffect(() => {
         let mounted = true;
@@ -184,6 +215,37 @@ function DoctorDashboard() {
         }
     }
 
+    const handlePasswordFormChange = (e) => {
+        setPasswordForm((prev) => ({
+            ...prev,
+            [e.target.name]: e.target.value,
+        }));
+    };
+
+    const handleCancelPasswordChange = () => {
+        setIsChangingPassword(false);
+        setPasswordForm({ oldPassword: "", newPassword: "" });
+    };
+
+    const handleChangePassword = async (e) => {
+        e.preventDefault();
+        setError("");
+        setPasswordLoading(true);
+        try {
+            await changeMyPassword({
+                oldPassword: passwordForm.oldPassword,
+                newPassword: passwordForm.newPassword,
+            });
+            setPasswordForm({ oldPassword: "", newPassword: "" });
+            setIsChangingPassword(false);
+            showActionMessage("Password changed successfully", "success");
+        } catch (error) {
+            setError(extractApiErrorMessage(error, "Failed to change password"));
+        } finally {
+            setPasswordLoading(false);
+        }
+    };
+
     const onSaveNotes = async (appointmentId) =>{
         setEditingNotesId(null);
         setActionLoadingId(appointmentId);
@@ -206,7 +268,7 @@ function DoctorDashboard() {
     };
 
     const onCancelNotesEdit = (appointmentId) => {
-        const current = upcomingAppointments.find((a) => a.id === appointmentId);
+        const current = [...upcomingAppointments, ...historyAppointments].find((a) => a.id === appointmentId);
         setNotesById((prev) => ({
             ...prev,
             [appointmentId]: current?.doctorNotes || "",
@@ -273,19 +335,35 @@ function DoctorDashboard() {
         }
     };
 
+    const canCancelAppointment = (appointment) =>
+        appointment?.status === "SCHEDULED" &&
+        isFutureAppointment(appointment?.appointmentDate, appointment?.appointmentTime) &&
+        !appointmentsWithPayments.has(Number(appointment?.id));
+
+    const cancelActionLabel = (appointment) => {
+        if (appointment?.status === "CANCELLED") return "Cancelled";
+        if (appointment?.status === "COMPLETED") return "Completed";
+        if (!isFutureAppointment(appointment?.appointmentDate, appointment?.appointmentTime)) return "Past";
+        if (appointmentsWithPayments.has(Number(appointment?.id))) return "Paid";
+        return "-";
+    };
+
 
 
     return (
-        <div style={{ padding: "24px" }}>
+        <div style={{ padding: "24px" }} onClickCapture={handlePageClickCapture}>
             <h1>Doctor Dashboard</h1>
+            {message?.text && (
+                <div style={getAnchoredActionMessageStyle(message.type, anchor)}>
+                    {message.text}
+                </div>
+            )}
             
             <button onClick={handleLogout}style={{ marginBottom: "16px" }}>
                 Logout
             </button>
 
             {loading && <p>Loading...</p>}
-            {!loading && error && <p style ={{color:"red"}}>{error}</p>}
-
             {!loading && needsProfile && (
                 <section style={{ marginTop: "16px", maxWidth: "480px"}}>
                     <h2>Create Your Profile</h2>
@@ -370,10 +448,62 @@ function DoctorDashboard() {
                                 <button onClick={() => setIsEditingProfile(true)}>
                                     Edit Profile
                                 </button>
+                                <div style={{ marginTop: "24px" }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsChangingPassword((prev) => !prev);
+                                            setPasswordForm({ oldPassword: "", newPassword: "" });
+                                        }}
+                                    >
+                                        Change Password
+                                    </button>
+                                </div>
+                                {isChangingPassword && (
+                                    <form onSubmit={handleChangePassword} style={{ marginTop: "10px", maxWidth: "480px" }}>
+                                        <div style={{ marginBottom: "10px" }}>
+                                            <label style={{ display: "block", marginBottom: "8px" }}>Old Password</label>
+                                            <input
+                                                type="password"
+                                                name="oldPassword"
+                                                value={passwordForm.oldPassword}
+                                                onChange={handlePasswordFormChange}
+                                                required
+                                                style={{ width: "100%", padding: "8px" }}
+                                            />
+                                        </div>
+                                        <div style={{ marginBottom: "10px" }}>
+                                            <label style={{ display: "block", marginBottom: "8px" }}>New Password</label>
+                                            <input
+                                                type="password"
+                                                name="newPassword"
+                                                value={passwordForm.newPassword}
+                                                onChange={handlePasswordFormChange}
+                                                minLength={6}
+                                                required
+                                                style={{ width: "100%", padding: "8px" }}
+                                            />
+                                        </div>
+                                        <button
+                                            type="submit"
+                                            disabled={passwordLoading}
+                                            style={{ marginRight: "8px" }}
+                                        >
+                                            {passwordLoading ? "Saving..." : "Save Password"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleCancelPasswordChange}
+                                            disabled={passwordLoading}
+                                        >
+                                            Cancel
+                                        </button>
+                                    </form>
+                                )}
                             </>
                         ) : (
                             <form onSubmit={handleUpdateProfile}>
-                                <div style={{ marginBottom: "10px" }}>
+                                <div style={{ marginBottom: "16px" }}>
                                     <label>First Name</label>
                                     <input
                                         name="firstName"
@@ -475,7 +605,7 @@ function DoctorDashboard() {
                                             {filteredAppointments.map((a) => (
                                                 <tr key={a.id}>
                                                     <td>{a.id}</td>
-                                                    <td>{a.appointmentDate}</td>
+                                                    <td>{formatDateDDMMYYYY(a.appointmentDate)}</td>
                                                     <td>{formatTimeHHmm(a.appointmentTime)}</td>
                                                     <td>{a.status}</td>
                                                     <td>{a.patientName || a.patientId}</td>
@@ -515,7 +645,7 @@ function DoctorDashboard() {
                                             {upcomingAppointments.map((a) => (
                                                 <tr key={a.id}>
                                                     <td style={centeredCellStyle}>{a.id}</td>
-                                                    <td style={centeredCellStyle}>{a.appointmentDate}</td>
+                                                    <td style={centeredCellStyle}>{formatDateDDMMYYYY(a.appointmentDate)}</td>
                                                     <td style={centeredCellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
                                                     <td style={centeredCellStyle}>{a.status}</td>
                                                     <td style={centeredCellStyle}>{a.patientName}</td>
@@ -585,12 +715,74 @@ function DoctorDashboard() {
                                                                 Update Notes
                                                             </button>
                                                         )}
-                                                        <button
-                                                            onClick={() => onCancel(a.id)}
-                                                            disabled={actionLoadingId === a.id}
-                                                        >
-                                                            {actionLoadingId === a.id ? "Cancelling..." : "Cancel Appointment"}
-                                                        </button>
+                                                        {canCancelAppointment(a) ? (
+                                                            <button
+                                                                onClick={() => onCancel(a.id)}
+                                                                disabled={actionLoadingId === a.id}
+                                                            >
+                                                                {actionLoadingId === a.id ? "Cancelling..." : "Cancel Appointment"}
+                                                            </button>
+                                                        ) : appointmentsWithPayments.has(Number(a?.id)) ? (
+                                                            <span
+                                                                style={{
+                                                                    display: "inline-flex",
+                                                                    flexDirection: "column",
+                                                                    alignItems: "center",
+                                                                    position: "relative",
+                                                                    cursor: "not-allowed",
+                                                                }}
+                                                                onMouseEnter={() => setHoveredPaidUpcomingCancelId(a.id)}
+                                                                onMouseLeave={() => {
+                                                                    if (hoveredPaidUpcomingCancelId === a.id) {
+                                                                        setHoveredPaidUpcomingCancelId(null);
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <button
+                                                                    disabled
+                                                                    style={{
+                                                                        opacity: 0.55,
+                                                                        cursor: "not-allowed",
+                                                                        pointerEvents: "none",
+                                                                    }}
+                                                                >
+                                                                    Cancel Appointment
+                                                                </button>
+                                                                {hoveredPaidUpcomingCancelId === a.id && (
+                                                                    <span
+                                                                        style={{
+                                                                            position: "absolute",
+                                                                            bottom: "calc(100% + 8px)",
+                                                                            left: "50%",
+                                                                            transform: "translateX(-50%)",
+                                                                            backgroundColor: "#111827",
+                                                                            color: "#fff",
+                                                                            padding: "6px 8px",
+                                                                            borderRadius: "6px",
+                                                                            fontSize: "12px",
+                                                                            whiteSpace: "nowrap",
+                                                                            zIndex: 5,
+                                                                        }}
+                                                                    >
+                                                                        Appointment has payment and cannot be cancelled
+                                                                    </span>
+                                                                )}
+                                                            </span>
+                                                        ) : (
+                                                            <span
+                                                                style={{
+                                                                    display: "inline-block",
+                                                                    padding: "6px 12px",
+                                                                    borderRadius: "999px",
+                                                                    backgroundColor: "#f2f4f7",
+                                                                    color: "#4b5563",
+                                                                    fontWeight: 600,
+                                                                    fontSize: "14px",
+                                                                }}
+                                                            >
+                                                                {cancelActionLabel(a)}
+                                                            </span>
+                                                        )}
                                                     </td>
                                                 </tr>
                                             ))}
@@ -630,14 +822,77 @@ function DoctorDashboard() {
                                             {historyAppointments.map((a) => (
                                                 <tr key={a.id}>
                                                     <td style={centeredCellStyle}>{a.id}</td>
-                                                    <td style={centeredCellStyle}>{a.appointmentDate}</td>
+                                                    <td style={centeredCellStyle}>{formatDateDDMMYYYY(a.appointmentDate)}</td>
                                                     <td style={centeredCellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
                                                     <td style={centeredCellStyle}>{a.status}</td>
                                                     <td style={centeredCellStyle}>{a.patientName || a.patientId}</td>
                                                     <td style={centeredCellStyle}>{a.serviceName || a.serviceId}</td>
-                                                    <td style={centeredCellStyle}>{a.doctorNotes || "-"}</td>
                                                     <td style={centeredCellStyle}>
-                                                        {a.status === "SCHEDULED" ? (
+                                                        <div
+                                                            style={{
+                                                                minWidth: "240px",
+                                                                margin: "0 auto",
+                                                                border: "1px solid #d9e1ea",
+                                                                borderRadius: "10px",
+                                                                backgroundColor: "#f8fbff",
+                                                                padding: "6px 10px",
+                                                            }}
+                                                        >
+                                                            {editingNotesId === a.id ? (
+                                                                <input
+                                                                    value={notesById[a.id] ?? ""}
+                                                                    onChange={(e) =>
+                                                                        setNotesById((prev) => ({
+                                                                            ...prev,
+                                                                            [a.id]: e.target.value,
+                                                                        }))
+                                                                    }
+                                                                    placeholder="Add your notes..."
+                                                                    style={{
+                                                                        width: "100%",
+                                                                        border: "none",
+                                                                        outline: "none",
+                                                                        background: "transparent",
+                                                                        padding: "4px 0",
+                                                                        textAlign: "center",
+                                                                        fontSize: "16px",
+                                                                    }}
+                                                                />
+                                                            ) : (
+                                                                <div style={{ padding: "4px 0", fontSize: "16px", textAlign: "center" }}>
+                                                                    {notesById[a.id] || a.doctorNotes || "-"}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td style={centeredCellStyle}>
+                                                        {editingNotesId === a.id ? (
+                                                            <>
+                                                                <button
+                                                                    onClick={() => onSaveNotes(a.id)}
+                                                                    disabled={actionLoadingId === a.id}
+                                                                    style={{ marginRight: "8px" }}
+                                                                >
+                                                                    {actionLoadingId === a.id ? "Saving..." : "Save Notes"}
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => onCancelNotesEdit(a.id)}
+                                                                    disabled={actionLoadingId === a.id}
+                                                                    style={{ marginRight: "8px" }}
+                                                                >
+                                                                    Cancel Edit
+                                                                </button>
+                                                            </>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => onStartNotesEdit(a.id)}
+                                                                disabled={actionLoadingId === a.id}
+                                                                style={{ marginRight: "8px" }}
+                                                            >
+                                                                Update Notes
+                                                            </button>
+                                                        )}
+                                                        {a.status === "SCHEDULED" && (
                                                             <span
                                                                 style={{
                                                                     display: "inline-flex",
@@ -688,8 +943,6 @@ function DoctorDashboard() {
                                                                     </span>
                                                                 )}
                                                             </span>
-                                                        ) : (
-                                                            "-"
                                                         )}
                                                     </td>
                                                 </tr>
@@ -699,49 +952,6 @@ function DoctorDashboard() {
                                 )}
                                 <button onClick={() => setShowAppointmentsHistory(false)} style={{ marginTop: "10px" }}>
                                     Hide Appointments History
-                                </button>
-                            </>
-                        )}
-                    </section>
-                    
-                    <section style={{ marginTop: "24px", marginBottom: "24px" }}>
-                        <h2>All The Appointments</h2>
-                        {!showAllAppointments ? (
-                            <button onClick={() => setShowAllAppointments(true)}>Show All The Appointments</button>
-                        ) : (
-                            <>
-                                {allAppointments.length === 0 ? (
-                                    <p>No appointments.</p>
-                                ) : (
-                                    <table border="1" cellPadding="8" style={centeredTableStyle}>
-                                        <thead>
-                                            <tr>
-                                                <th style={centeredCellStyle}>ID</th>
-                                                <th style={centeredCellStyle}>Date</th>
-                                                <th style={centeredCellStyle}>Time</th>
-                                                <th style={centeredCellStyle}>Status</th>
-                                                <th style={centeredCellStyle}>Patient</th>
-                                                <th style={centeredCellStyle}>Service</th>
-                                                <th style={centeredCellStyle}>My Notes</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {allAppointments.map((a) => (
-                                                <tr key={a.id}>
-                                                    <td style={centeredCellStyle}>{a.id}</td>
-                                                    <td style={centeredCellStyle}>{a.appointmentDate}</td>
-                                                    <td style={centeredCellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
-                                                    <td style={centeredCellStyle}>{a.status}</td>
-                                                    <td style={centeredCellStyle}>{a.patientName || a.patientId}</td>
-                                                    <td style={centeredCellStyle}>{a.serviceName || a.serviceId}</td>
-                                                    <td style={centeredCellStyle}>{a.doctorNotes || "-"}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                )}
-                                <button onClick={() => setShowAllAppointments(false)} style={{ marginTop: "10px" }}>
-                                    Hide All The Appointments
                                 </button>
                             </>
                         )}
@@ -764,7 +974,6 @@ function DoctorDashboard() {
                                                 <th style={centeredCellStyle}>Last Name</th>
                                                 <th style={centeredCellStyle}>Phone</th>
                                                 <th style={centeredCellStyle}>Date Of Birth</th>
-                                                <th style={centeredCellStyle}>Notes</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -774,8 +983,7 @@ function DoctorDashboard() {
                                                     <td style={centeredCellStyle}>{p.firstName}</td>
                                                     <td style={centeredCellStyle}>{p.lastName}</td>
                                                     <td style={centeredCellStyle}>{p.phone}</td>
-                                                    <td style={centeredCellStyle}>{p.dateOfBirth}</td>
-                                                    <td style={centeredCellStyle}>{p.notes || "-"}</td>
+                                                    <td style={centeredCellStyle}>{formatDateDDMMYYYY(p.dateOfBirth)}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -794,3 +1002,4 @@ function DoctorDashboard() {
 }
 
 export default DoctorDashboard;
+

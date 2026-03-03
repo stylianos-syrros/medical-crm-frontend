@@ -11,9 +11,10 @@ import {
     getPatientUpcomingAppointments,
 } from "../features/user/appointmentApi";
 import { extractApiErrorMessage } from "../utils/errors";
-import { formatTimeHHmm } from "../utils/dateTime";
+import { formatDateDDMMYYYY, formatTimeHHmm } from "../utils/dateTime";
 import { sortAppointmentsByDateTime, filterAppointmentsByStatus } from "../utils/appointments";
 import { getDefaultAppointmentBookingForm } from "../utils/forms";
+import { getAnchoredActionMessageStyle, useAnchoredActionMessage } from "../utils/actionMessage";
 
 const SLOT_START_HOUR = 9;
 const SLOT_END_HOUR = 20;
@@ -49,11 +50,22 @@ function overlaps(startA, endA, startB, endB) {
     return startA < endB && startB < endA;
 }
 
+function buildPatientConflictReason(doctorName) {
+    const cleanDoctorName = String(doctorName || "").trim();
+    if (!cleanDoctorName) return "You already have an appointment";
+    const withTitle = cleanDoctorName.toLowerCase().startsWith("dr ")
+        ? cleanDoctorName
+        : `Dr ${cleanDoctorName}`;
+    return `You already have an appointment with ${withTitle}`;
+}
+
 const HALF_HOUR_SLOTS = createHalfHourSlots();
 
 function PatientAppointmentsPage() {
     const navigate = useNavigate();
     const dispatch = useDispatch();
+    const { anchor, message, captureActionAnchor, showActionMessage, clearActionMessage } =
+        useAnchoredActionMessage();
 
     const [loading, setLoading] = useState(true);
     const [bookingLoading, setBookingLoading] = useState(false);
@@ -74,7 +86,16 @@ function PatientAppointmentsPage() {
     });
 
 	const [viewDate, setViewDate] = useState(getTomorrowDate());
-	const [doctorAppointmentsForViewDate, setDoctorAppointmentsForViewDate] = useState([]);
+    const [doctorAppointmentsForViewDate, setDoctorAppointmentsForViewDate] = useState([]);
+
+    const allPatientScheduledAppointments = useMemo(
+        () =>
+            filterAppointmentsByStatus(
+                [...upcomingAppointments, ...historyAppointments],
+                "SCHEDULED"
+            ),
+        [upcomingAppointments, historyAppointments]
+    );
 
     const loadPageData = async () => {
         setLoading(true);
@@ -156,7 +177,11 @@ function PatientAppointmentsPage() {
     const selectedDateAppointments = useMemo(() => {
 		const all = [...upcomingAppointments, ...historyAppointments];
 		return sortAppointmentsByDateTime(
-            all.filter((a) => a.appointmentDate === viewDate)
+            all.filter(
+                (a) =>
+                    a.appointmentDate === viewDate &&
+                    (a.status === "SCHEDULED" || a.status === "COMPLETED")
+            )
         );
 	}, [upcomingAppointments, historyAppointments, viewDate]);
 
@@ -174,16 +199,18 @@ function PatientAppointmentsPage() {
     }, [form.serviceId, serviceDurationById]);
 
     const viewPatientBusyIntervals = useMemo(() => {
-        return filterAppointmentsByStatus(
-            upcomingAppointments.filter((a) => a.appointmentDate === viewDate),
-            "SCHEDULED"
-        )
+        return allPatientScheduledAppointments
+            .filter((a) => a.appointmentDate === viewDate)
             .map((a) => {
                 const start = toMinutes(formatTimeHHmm(a.appointmentTime, ""));
                 const duration = serviceDurationById[a.serviceId] || 30;
-                return { start, end: start + duration };
+                return {
+                    start,
+                    end: start + duration,
+                    doctorName: a.doctorName,
+                };
             });
-    }, [upcomingAppointments, viewDate, serviceDurationById]);
+    }, [allPatientScheduledAppointments, viewDate, serviceDurationById]);
 
     const viewDoctorBusyIntervals = useMemo(() => {
         return filterAppointmentsByStatus(doctorAppointmentsForViewDate, "SCHEDULED")
@@ -203,35 +230,37 @@ function PatientAppointmentsPage() {
             const slotStart = toMinutes(slot);
             const slotEnd = slotStart + viewSelectedServiceDuration;
 
-            const patientOverlap = viewPatientBusyIntervals.some((i) => overlaps(slotStart, slotEnd, i.start, i.end));
+            const patientOverlaps = viewPatientBusyIntervals.filter((i) =>
+                overlaps(slotStart, slotEnd, i.start, i.end)
+            );
             const doctorOverlap = form.doctorId
                 ? viewDoctorBusyIntervals.some((i) => overlaps(slotStart, slotEnd, i.start, i.end))
                 : false;
 
-            if (patientOverlap) reasons.push("You already have an appointment");
+            patientOverlaps.forEach((interval) =>
+                reasons.push(buildPatientConflictReason(interval.doctorName))
+            );
             if (doctorOverlap) reasons.push("Doctor is not available");
 
-            map[slot] = reasons;
+            map[slot] = [...new Set(reasons)];
         });
 
         return map;
     }, [viewPatientBusyIntervals, viewDoctorBusyIntervals, form.doctorId, form.serviceId, serviceDurationById]);
 
     const patientBusyIntervals = useMemo(() => {
-        return filterAppointmentsByStatus(
-            upcomingAppointments.filter((a) => a.appointmentDate === form.appointmentDate),
-            "SCHEDULED"
-        )
+        return allPatientScheduledAppointments
+            .filter((a) => a.appointmentDate === form.appointmentDate)
             .map((a) => {
                 const start = toMinutes(formatTimeHHmm(a.appointmentTime, ""));
                 const duration = serviceDurationById[a.serviceId] || 30;
                 return {
                     start,
                     end: start + duration,
-                    reason: "You already have an appointment",
+                    reason: buildPatientConflictReason(a.doctorName),
                 };
             });
-    }, [upcomingAppointments, form.appointmentDate, serviceDurationById]);
+    }, [allPatientScheduledAppointments, form.appointmentDate, serviceDurationById]);
 
     const doctorBusyIntervals = useMemo(() => {
         return filterAppointmentsByStatus(doctorAppointmentsForDate, "SCHEDULED")
@@ -254,7 +283,7 @@ function PatientAppointmentsPage() {
             const slotStart = toMinutes(slot);
             const slotEnd = slotStart + selectedServiceDuration;
 
-            const hasPatientOverlap = patientBusyIntervals.some((interval) =>
+            const patientOverlaps = patientBusyIntervals.filter((interval) =>
                 overlaps(slotStart, slotEnd, interval.start, interval.end)
             );
             const hasDoctorOverlap = form.doctorId
@@ -263,10 +292,10 @@ function PatientAppointmentsPage() {
                 )
                 : false;
 
-            if (hasPatientOverlap) reasons.push("You already have an appointment");
+            patientOverlaps.forEach((interval) => reasons.push(interval.reason));
             if (hasDoctorOverlap) reasons.push("Doctor is not available");
 
-            map[slot] = reasons;
+            map[slot] = [...new Set(reasons)];
         });
 
         return map;
@@ -286,6 +315,20 @@ function PatientAppointmentsPage() {
         dispatch(logout());
         navigate("/login");
     };
+
+    const handlePageClickCapture = (e) => {
+        const didClickButton = captureActionAnchor(e);
+        if (!didClickButton) return;
+        setError("");
+        setSuccess("");
+        clearActionMessage();
+    };
+
+    useEffect(() => {
+        if (error) {
+            showActionMessage(error, "error");
+        }
+    }, [error]);
 
     const onBook = async (e) => {
         e.preventDefault();
@@ -334,8 +377,14 @@ function PatientAppointmentsPage() {
     };
 
     return (
-        <div style={{ padding: "24px" }}>
+        <div style={{ padding: "24px" }} onClickCapture={handlePageClickCapture}>
             <h1>Patient Appointments</h1>
+            {message?.text && (
+                <div style={getAnchoredActionMessageStyle(message.type, anchor)}>
+                    {message.text}
+                </div>
+            )}
+            {success && <p style={{ color: "green" }}>{success}</p>}
 
             <div style={{ marginBottom: "16px" }}>
                 <button onClick={() => navigate("/patient")} style={{ marginRight: "8px" }}>
@@ -345,9 +394,6 @@ function PatientAppointmentsPage() {
             </div>
 
             {loading && <p>Loading...</p>}
-            {!loading && error && <p style={{ color: "red" }}>{error}</p>}
-            {!loading && success && <p style={{ color: "green" }}>{success}</p>}
-
             {!loading && needsProfile && (
                 <section>
                     <p>You need to create your patient profile first.</p>
@@ -478,7 +524,7 @@ function PatientAppointmentsPage() {
 					</section>
 
                     <section style={{ marginBottom: "24px" }}>
-                        <h2>Unavailable Times For {viewDate}</h2>
+                        <h2>Unavailable Times For {formatDateDDMMYYYY(viewDate)}</h2>
                         {HALF_HOUR_SLOTS.every((slot) => viewBlockedSlots[slot].length === 0) ? (
                             <p>All slots are available.</p>
                         ) : (
@@ -502,7 +548,7 @@ function PatientAppointmentsPage() {
                     </section>
 
                     <section>
-                        <h2>My Appointments On {viewDate}</h2>
+                        <h2>My Appointments On {formatDateDDMMYYYY(viewDate)}</h2>
                         {selectedDateAppointments.length === 0 ? (
                             <p>No appointments for this date.</p>
                         ) : (
@@ -539,3 +585,4 @@ function PatientAppointmentsPage() {
 }
 
 export default PatientAppointmentsPage;
+

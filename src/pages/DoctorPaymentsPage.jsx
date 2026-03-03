@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { logout } from "../features/auth/authSlice";
@@ -9,20 +9,24 @@ import {
     getMyDoctorTotalReceived,
     getMyDoctorUnpaidAppointments,
 } from "../features/user/paymentApi";
+import { getAllMedicalServices } from "../features/user/medicalServiceApi";
 import { extractApiErrorMessage } from "../utils/errors";
-import { formatTimeHHmm } from "../utils/dateTime";
+import { formatDateDDMMYYYY, formatTimeHHmm } from "../utils/dateTime";
 import { sortAppointmentsByDateTime } from "../utils/appointments";
-import { computePaymentProgress } from "../utils/payments";
+import { getAnchoredActionMessageStyle, useAnchoredActionMessage } from "../utils/actionMessage";
 
 function DoctorPaymentsPage() {
     const navigate = useNavigate();
     const dispatch = useDispatch();
+    const { anchor, message, captureActionAnchor, showActionMessage, clearActionMessage } =
+        useAnchoredActionMessage();
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
     const [paidAppointments, setPaidAppointments] = useState([]);
     const [unpaidAppointments, setUnpaidAppointments] = useState([]);
+    const [servicePriceById, setServicePriceById] = useState({});
 
     const [totalReceived, setTotalReceived] = useState(0);
     const [totalPending, setTotalPending] = useState(0);
@@ -33,17 +37,25 @@ function DoctorPaymentsPage() {
         navigate("/login");
     };
 
+    const handlePageClickCapture = (e) => {
+        const didClickButton = captureActionAnchor(e);
+        if (!didClickButton) return;
+        setError("");
+        clearActionMessage();
+    };
+
     const loadData = async () => {
         setLoading(true);
         setError("");
 
         try {
-            const [paid, unpaid, received, pending, expected] = await Promise.all([
+            const [paid, unpaid, received, pending, expected, services] = await Promise.all([
                 getMyDoctorPaidAppointments(),
                 getMyDoctorUnpaidAppointments(),
                 getMyDoctorTotalReceived(),
                 getMyDoctorTotalPending(),
                 getMyDoctorTotalExpected(),
+                getAllMedicalServices(),
             ]);
 
             setPaidAppointments(sortAppointmentsByDateTime(paid || []));
@@ -51,6 +63,12 @@ function DoctorPaymentsPage() {
             setTotalReceived(Number(received || 0));
             setTotalPending(Number(pending || 0));
             setTotalExpected(Number(expected || 0));
+
+            const prices = {};
+            (services || []).forEach((service) => {
+                prices[service.id] = Number(service.price || 0);
+            });
+            setServicePriceById(prices);
         } catch (err) {
             setError(extractApiErrorMessage(err, "Failed to load doctor payments"));
         } finally {
@@ -62,14 +80,47 @@ function DoctorPaymentsPage() {
         loadData();
     }, []);
 
-    const progress = computePaymentProgress(totalReceived, totalExpected);
+    useEffect(() => {
+        if (error) {
+            showActionMessage(error, "error");
+        }
+    }, [error]);
+
+    const getServicePrice = (appointment) => Number(servicePriceById[appointment?.serviceId] || 0);
+    const getEstimatedPaid = (appointment) => Number(appointment?.totalPaid || 0);
+    const getEstimatedPending = (appointment) => {
+        const backendPending = Number(appointment?.pendingAmount);
+        if (Number.isFinite(backendPending) && backendPending >= 0) return backendPending;
+        return Math.max(0, getServicePrice(appointment) - getEstimatedPaid(appointment));
+    };
+    const formatMoney = (value) => Number(value || 0).toFixed(2);
+
+    const payableAppointments = useMemo(
+        () => unpaidAppointments.filter((a) => getEstimatedPending(a) > 0),
+        [unpaidAppointments, servicePriceById]
+    );
+
+    const unpaidOnlyAppointments = useMemo(
+        () => payableAppointments.filter((a) => getEstimatedPaid(a) <= 0),
+        [payableAppointments]
+    );
+
+    const partiallyPaidAppointments = useMemo(
+        () => payableAppointments.filter((a) => getEstimatedPaid(a) > 0),
+        [payableAppointments]
+    );
 
     const tableStyle = { borderCollapse: "collapse", width: "100%", textAlign: "center" };
     const cellStyle = { border: "1px solid #ccc", padding: "8px" };
 
     return (
-        <div style={{ padding: "24px" }}>
+        <div style={{ padding: "24px" }} onClickCapture={handlePageClickCapture}>
             <h1>Doctor Payments</h1>
+            {message?.text && (
+                <div style={getAnchoredActionMessageStyle(message.type, anchor)}>
+                    {message.text}
+                </div>
+            )}
 
             <div style={{ marginBottom: "16px" }}>
                 <button onClick={() => navigate("/doctor")} style={{ marginRight: "8px" }}>
@@ -79,8 +130,6 @@ function DoctorPaymentsPage() {
             </div>
 
             {loading && <p>Loading...</p>}
-            {!loading && error && <p style={{ color: "red" }}>{error}</p>}
-
             {!loading && (
                 <>
                     <section style={{ marginBottom: "24px" }}>
@@ -88,12 +137,11 @@ function DoctorPaymentsPage() {
                         <p><strong>Total Expected:</strong> {totalExpected.toFixed(2)}</p>
                         <p><strong>Total Received:</strong> {totalReceived.toFixed(2)}</p>
                         <p><strong>Total Pending:</strong> {totalPending.toFixed(2)}</p>
-                        <p><strong>Progress:</strong> {progress.status}</p>
                     </section>
 
                     <section style={{ marginBottom: "24px" }}>
                         <h2>Unpaid Appointments</h2>
-                        {unpaidAppointments.length === 0 ? (
+                        {unpaidOnlyAppointments.length === 0 ? (
                             <p>No unpaid appointments.</p>
                         ) : (
                             <table style={tableStyle}>
@@ -105,17 +153,61 @@ function DoctorPaymentsPage() {
                                         <th style={cellStyle}>Status</th>
                                         <th style={cellStyle}>Patient</th>
                                         <th style={cellStyle}>Service</th>
+                                        <th style={cellStyle}>Price</th>
+                                        <th style={cellStyle}>Total Paid</th>
+                                        <th style={cellStyle}>Pending</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {unpaidAppointments.map((a) => (
+                                    {unpaidOnlyAppointments.map((a) => (
                                         <tr key={a.id}>
                                             <td style={cellStyle}>{a.id}</td>
-                                            <td style={cellStyle}>{a.appointmentDate}</td>
+                                            <td style={cellStyle}>{formatDateDDMMYYYY(a.appointmentDate)}</td>
                                             <td style={cellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
                                             <td style={cellStyle}>{a.status}</td>
                                             <td style={cellStyle}>{a.patientName || a.patientId}</td>
                                             <td style={cellStyle}>{a.serviceName || a.serviceId}</td>
+                                            <td style={cellStyle}>{formatMoney(getServicePrice(a))}</td>
+                                            <td style={cellStyle}>{formatMoney(getEstimatedPaid(a))}</td>
+                                            <td style={cellStyle}>{formatMoney(getEstimatedPending(a))}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </section>
+
+                    <section style={{ marginBottom: "24px" }}>
+                        <h2>Partially Paid Appointments</h2>
+                        {partiallyPaidAppointments.length === 0 ? (
+                            <p>No partially paid appointments.</p>
+                        ) : (
+                            <table style={tableStyle}>
+                                <thead>
+                                    <tr>
+                                        <th style={cellStyle}>ID</th>
+                                        <th style={cellStyle}>Date</th>
+                                        <th style={cellStyle}>Time</th>
+                                        <th style={cellStyle}>Status</th>
+                                        <th style={cellStyle}>Patient</th>
+                                        <th style={cellStyle}>Service</th>
+                                        <th style={cellStyle}>Price</th>
+                                        <th style={cellStyle}>Total Paid</th>
+                                        <th style={cellStyle}>Pending</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {partiallyPaidAppointments.map((a) => (
+                                        <tr key={a.id}>
+                                            <td style={cellStyle}>{a.id}</td>
+                                            <td style={cellStyle}>{formatDateDDMMYYYY(a.appointmentDate)}</td>
+                                            <td style={cellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
+                                            <td style={cellStyle}>{a.status}</td>
+                                            <td style={cellStyle}>{a.patientName || a.patientId}</td>
+                                            <td style={cellStyle}>{a.serviceName || a.serviceId}</td>
+                                            <td style={cellStyle}>{formatMoney(getServicePrice(a))}</td>
+                                            <td style={cellStyle}>{formatMoney(getEstimatedPaid(a))}</td>
+                                            <td style={cellStyle}>{formatMoney(getEstimatedPending(a))}</td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -137,17 +229,19 @@ function DoctorPaymentsPage() {
                                         <th style={cellStyle}>Status</th>
                                         <th style={cellStyle}>Patient</th>
                                         <th style={cellStyle}>Service</th>
+                                        <th style={cellStyle}>Price</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {paidAppointments.map((a) => (
                                         <tr key={a.id}>
                                             <td style={cellStyle}>{a.id}</td>
-                                            <td style={cellStyle}>{a.appointmentDate}</td>
+                                            <td style={cellStyle}>{formatDateDDMMYYYY(a.appointmentDate)}</td>
                                             <td style={cellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
                                             <td style={cellStyle}>{a.status}</td>
                                             <td style={cellStyle}>{a.patientName || a.patientId}</td>
                                             <td style={cellStyle}>{a.serviceName || a.serviceId}</td>
+                                            <td style={cellStyle}>{formatMoney(getServicePrice(a))}</td>
                                         </tr>
                                     ))}
                                 </tbody>

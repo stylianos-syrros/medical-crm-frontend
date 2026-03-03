@@ -12,8 +12,9 @@ import {
 } from "../features/user/paymentApi";
 import { getAllMedicalServices } from "../features/user/medicalServiceApi";
 import { extractApiErrorMessage } from "../utils/errors";
-import { formatTimeHHmm } from "../utils/dateTime";
+import { formatDateDDMMYYYY, formatTimeHHmm } from "../utils/dateTime";
 import { sortAppointmentsByDateTime } from "../utils/appointments";
+import { getAnchoredActionMessageStyle, useAnchoredActionMessage } from "../utils/actionMessage";
 
 const PAYMENT_CACHE_KEY = "patient_paid_by_appointment";
 const LEGACY_PAYMENT_CACHE_KEY = "patient_payment_paid_by_appointment";
@@ -43,6 +44,8 @@ function loadCachedPaidByAppointment() {
 function PatientPaymentsPage() {
     const navigate = useNavigate();
     const dispatch = useDispatch();
+    const { anchor, message, captureActionAnchor, showActionMessage, clearActionMessage } =
+        useAnchoredActionMessage();
 
     const [loading, setLoading] = useState(true);
     const [paying, setPaying] = useState(false);
@@ -60,13 +63,21 @@ function PatientPaymentsPage() {
 
     const [form, setForm] = useState({
         appointmentId: "",
-        paymentMethod: "CARD",
+        paymentMethod: "",
         amount: "",
     });
 
     const handleLogout = () => {
         dispatch(logout());
         navigate("/login");
+    };
+
+    const handlePageClickCapture = (e) => {
+        const didClickButton = captureActionAnchor(e);
+        if (!didClickButton) return;
+        setError("");
+        setSuccess("");
+        clearActionMessage();
     };
 
     const loadData = async () => {
@@ -100,7 +111,7 @@ function PatientPaymentsPage() {
             setForm((prev) => {
                 if (!sortedUnpaid.length) return { ...prev, appointmentId: "" };
                 const stillExists = sortedUnpaid.some((a) => String(a.id) === String(prev.appointmentId));
-                return { ...prev, appointmentId: stillExists ? prev.appointmentId : String(sortedUnpaid[0].id) };
+                return { ...prev, appointmentId: stillExists ? prev.appointmentId : "" };
             });
         } catch (err) {
             setError(extractApiErrorMessage(err, "Failed to load payment data"));
@@ -114,14 +125,15 @@ function PatientPaymentsPage() {
     }, []);
 
     useEffect(() => {
+        if (error) {
+            showActionMessage(error, "error");
+        }
+    }, [error]);
+
+    useEffect(() => {
         localStorage.setItem(PAYMENT_CACHE_KEY, JSON.stringify(paidByAppointmentId));
         localStorage.removeItem(LEGACY_PAYMENT_CACHE_KEY);
     }, [paidByAppointmentId]);
-
-    const selectedAppointment = useMemo(
-        () => unpaidAppointments.find((a) => String(a.id) === String(form.appointmentId)),
-        [unpaidAppointments, form.appointmentId]
-    );
 
     const getServicePrice = (appointment) => Number(servicePriceById[appointment?.serviceId] || 0);
     const getEstimatedPaid = (appointment) => {
@@ -138,6 +150,26 @@ function PatientPaymentsPage() {
         return Math.max(0, getServicePrice(appointment) - getEstimatedPaid(appointment));
     };
 
+    const payableAppointments = useMemo(
+        () => unpaidAppointments.filter((a) => getEstimatedPending(a) > 0),
+        [unpaidAppointments]
+    );
+
+    const unpaidOnlyAppointments = useMemo(
+        () => payableAppointments.filter((a) => getEstimatedPaid(a) <= 0),
+        [payableAppointments]
+    );
+
+    const partiallyPaidAppointments = useMemo(
+        () => payableAppointments.filter((a) => getEstimatedPaid(a) > 0),
+        [payableAppointments]
+    );
+
+    const selectedAppointment = useMemo(
+        () => payableAppointments.find((a) => String(a.id) === String(form.appointmentId)),
+        [payableAppointments, form.appointmentId]
+    );
+
     const onPay = async (e) => {
         e.preventDefault();
         setError("");
@@ -145,6 +177,10 @@ function PatientPaymentsPage() {
 
         if (!form.appointmentId) {
             setError("Please select an appointment");
+            return;
+        }
+        if (!form.paymentMethod) {
+            setError("Please select a payment method");
             return;
         }
 
@@ -178,7 +214,6 @@ function PatientPaymentsPage() {
                 return { ...prev, [selectedKey]: Number(nextPaid.toFixed(2)) };
             });
 
-            // Optimistic update so the unpaid table reflects the payment immediately.
             setUnpaidAppointments((prev) => {
                 const currentAppointment = prev.find((a) => Number(a.id) === appointmentId);
                 if (!currentAppointment) return prev;
@@ -214,16 +249,6 @@ function PatientPaymentsPage() {
 
     const tableStyle = { borderCollapse: "collapse", width: "100%", textAlign: "center" };
     const cellStyle = { border: "1px solid #ccc", padding: "8px" };
-    const darkErrorBoxStyle = {
-        backgroundColor: "#111827",
-        color: "#ffffff",
-        padding: "10px 12px",
-        borderRadius: "8px",
-        marginBottom: "12px",
-        display: "inline-block",
-        fontSize: "14px",
-        lineHeight: 1.4,
-    };
     const paymentFieldStyle = {
         width: "100%",
         padding: "8px",
@@ -232,8 +257,14 @@ function PatientPaymentsPage() {
     };
 
     return (
-        <div style={{ padding: "24px" }}>
+        <div style={{ padding: "24px" }} onClickCapture={handlePageClickCapture}>
             <h1>Patient Payments</h1>
+            {message?.text && (
+                <div style={getAnchoredActionMessageStyle(message.type, anchor)}>
+                    {message.text}
+                </div>
+            )}
+            {success && <p style={{ color: "green" }}>{success}</p>}
 
             <div style={{ marginBottom: "16px" }}>
                 <button onClick={() => navigate("/patient")} style={{ marginRight: "8px" }}>
@@ -243,8 +274,6 @@ function PatientPaymentsPage() {
             </div>
 
             {loading && <p>Loading...</p>}
-            {!loading && success && <p style={{ color: "green" }}>{success}</p>}
-
             {!loading && (
                 <>
                     <section style={{ marginBottom: "24px" }}>
@@ -256,23 +285,23 @@ function PatientPaymentsPage() {
 
                     <section style={{ marginBottom: "14px", maxWidth: "920px" }}>
                         <h2>Make Payment</h2>
-                        {error && <div style={darkErrorBoxStyle}>{error}</div>}
                         <form onSubmit={onPay}>
                             <div style={{ marginBottom: "10px" }}>
-                                <label>Unpaid Appointment</label>
+                                <label>Unpaid/Partially Paid Appointments</label>
                                 <select
                                     value={form.appointmentId}
                                     onChange={(e) => setForm((prev) => ({ ...prev, appointmentId: e.target.value }))}
                                     style={paymentFieldStyle}
                                     required
-                                    disabled={!unpaidAppointments.length}
+                                    disabled={!payableAppointments.length}
                                 >
-                                    {!unpaidAppointments.length ? (
+                                    <option value="">-</option>
+                                    {!payableAppointments.length ? (
                                         <option value="">No unpaid appointments</option>
                                     ) : (
-                                        unpaidAppointments.map((a) => (
+                                        payableAppointments.map((a) => (
                                             <option key={a.id} value={a.id}>
-                                                #{a.id} - {a.appointmentDate} {formatTimeHHmm(a.appointmentTime)} - {a.serviceName || a.serviceId} - {a.doctorName || a.doctorId} - Price: {formatMoney(getServicePrice(a))} - Pending: {formatMoney(getEstimatedPending(a))}
+                                                #{a.id} - {formatDateDDMMYYYY(a.appointmentDate)} {formatTimeHHmm(a.appointmentTime)} - {a.serviceName || a.serviceId} - {a.doctorName || a.doctorId} - Price: {formatMoney(getServicePrice(a))} - Pending: {formatMoney(getEstimatedPending(a))}
                                             </option>
                                         ))
                                     )}
@@ -287,6 +316,7 @@ function PatientPaymentsPage() {
                                     style={paymentFieldStyle}
                                     required
                                 >
+                                    <option value="">-</option>
                                     <option value="CARD">CARD</option>
                                     <option value="CASH">CASH</option>
                                 </select>
@@ -311,7 +341,7 @@ function PatientPaymentsPage() {
                                 </p>
                             )}
 
-                            <button type="submit" disabled={paying || !unpaidAppointments.length}>
+                            <button type="submit" disabled={paying || !payableAppointments.length || !form.appointmentId || !form.paymentMethod}>
                                 {paying ? "Processing..." : "Pay"}
                             </button>
                         </form>
@@ -319,7 +349,7 @@ function PatientPaymentsPage() {
 
                     <section style={{ marginBottom: "24px" }}>
                         <h2>Unpaid Appointments</h2>
-                        {unpaidAppointments.length === 0 ? (
+                        {unpaidOnlyAppointments.length === 0 ? (
                             <p>No unpaid appointments.</p>
                         ) : (
                             <table style={tableStyle}>
@@ -337,10 +367,48 @@ function PatientPaymentsPage() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {unpaidAppointments.map((a) => (
+                                    {unpaidOnlyAppointments.map((a) => (
                                         <tr key={a.id}>
                                             <td style={cellStyle}>{a.id}</td>
-                                            <td style={cellStyle}>{a.appointmentDate}</td>
+                                            <td style={cellStyle}>{formatDateDDMMYYYY(a.appointmentDate)}</td>
+                                            <td style={cellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
+                                            <td style={cellStyle}>{a.status}</td>
+                                            <td style={cellStyle}>{a.doctorName || a.doctorId}</td>
+                                            <td style={cellStyle}>{a.serviceName || a.serviceId}</td>
+                                            <td style={cellStyle}>{formatMoney(getServicePrice(a))}</td>
+                                            <td style={cellStyle}>{formatMoney(getEstimatedPaid(a))}</td>
+                                            <td style={cellStyle}>{formatMoney(getEstimatedPending(a))}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </section>
+
+                    <section style={{ marginBottom: "24px" }}>
+                        <h2>Partially Paid Appointments</h2>
+                        {partiallyPaidAppointments.length === 0 ? (
+                            <p>No partially paid appointments.</p>
+                        ) : (
+                            <table style={tableStyle}>
+                                <thead>
+                                    <tr>
+                                        <th style={cellStyle}>ID</th>
+                                        <th style={cellStyle}>Date</th>
+                                        <th style={cellStyle}>Time</th>
+                                        <th style={cellStyle}>Status</th>
+                                        <th style={cellStyle}>Doctor</th>
+                                        <th style={cellStyle}>Service</th>
+                                        <th style={cellStyle}>Price</th>
+                                        <th style={cellStyle}>Total Paid</th>
+                                        <th style={cellStyle}>Pending</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {partiallyPaidAppointments.map((a) => (
+                                        <tr key={a.id}>
+                                            <td style={cellStyle}>{a.id}</td>
+                                            <td style={cellStyle}>{formatDateDDMMYYYY(a.appointmentDate)}</td>
                                             <td style={cellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
                                             <td style={cellStyle}>{a.status}</td>
                                             <td style={cellStyle}>{a.doctorName || a.doctorId}</td>
@@ -376,7 +444,7 @@ function PatientPaymentsPage() {
                                     {paidAppointments.map((a) => (
                                         <tr key={a.id}>
                                             <td style={cellStyle}>{a.id}</td>
-                                            <td style={cellStyle}>{a.appointmentDate}</td>
+                                            <td style={cellStyle}>{formatDateDDMMYYYY(a.appointmentDate)}</td>
                                             <td style={cellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
                                             <td style={cellStyle}>{a.status}</td>
                                             <td style={cellStyle}>{a.doctorName || a.doctorId}</td>

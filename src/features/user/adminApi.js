@@ -35,9 +35,13 @@ export async function changePassword(userId, payload) {
     return response.data;
 }
 
+export async function changeMyPassword(payload) {
+    const response = await client.put("/api/users/me/password", payload);
+    return response.data;
+}
+
 export async function deleteUser(userId){
     const response = await client.delete(`/api/users/${userId}`);
     return response.data;
 }
-
 

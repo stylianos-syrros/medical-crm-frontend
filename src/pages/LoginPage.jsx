@@ -5,10 +5,13 @@ import { setCredentials, setAuthError, setAuthLoading, clearAuthError } from "..
 import { loginUser } from "../features/auth/authApi";
 import { parseRoleFromToken } from "../features/auth/tokenUtils";
 import { extractApiErrorMessage } from "../utils/errors";
+import { getAnchoredActionMessageStyle, useAnchoredActionMessage } from "../utils/actionMessage";
 
 function LoginPage(){
     const navigate = useNavigate();
     const dispatch = useDispatch();
+    const { anchor, message, captureActionAnchor, showActionMessage, clearActionMessage } =
+        useAnchoredActionMessage();
 
     const [form,setForm] = useState({ username:"", password:"" });
     
@@ -28,8 +31,22 @@ function LoginPage(){
     const handleChange = (e) => {
         if (error) {
             dispatch(clearAuthError());
+            clearActionMessage();
         }
         setForm((prev) => ({...prev, [e.target.name]: e.target.value }));
+    };
+
+    useEffect(() => {
+        if (error) {
+            showActionMessage(error, "error");
+        }
+    }, [error]);
+
+    const handlePageClickCapture = (e) => {
+        const didClickButton = captureActionAnchor(e);
+        if (!didClickButton) return;
+        dispatch(clearAuthError());
+        clearActionMessage();
     };
 
     const handleSubmit = async (e) => {
@@ -50,8 +67,14 @@ function LoginPage(){
                 throw new Error("Unknown role");
             }
         } catch (error){
+            const apiMessage = extractApiErrorMessage(error, "Login failed");
+            const normalized = String(apiMessage || "").toLowerCase();
+            const loginMessage = normalized.includes("disabled")
+                ? "Your account is disabled. Please contact admin."
+                : apiMessage;
+
             dispatch(
-                setAuthError(extractApiErrorMessage(error, "Login failed"))
+                setAuthError(loginMessage)
             );
         }finally{
             dispatch(setAuthLoading(false));
@@ -59,8 +82,13 @@ function LoginPage(){
     };
 
     return(
-        <div style={{ padding: "24px", maxWidth:"420px"}}>
+        <div style={{ padding: "24px", maxWidth:"420px"}} onClickCapture={handlePageClickCapture}>
             <h1>Login Page</h1>
+            {message?.text && (
+                <div style={getAnchoredActionMessageStyle(message.type, anchor)}>
+                    {message.text}
+                </div>
+            )}
 
             <form onSubmit={handleSubmit}>
                 <div style={{ marginBottom: "12px"}}>
@@ -91,8 +119,6 @@ function LoginPage(){
                     {loading ? "Logging in..." : "Login"}
                 </button>
             </form>
-
-        {error && <p style={{ color: "red", marginTop: "12px"}}>{error}</p>}
         </div>
     );
 }
