@@ -11,9 +11,17 @@ import {
 import {
   getDoctorUpcomingAppointments,
   getDoctorAppointmentsHistory,
+  getDoctorAppointmentsByStatus,
   updateDoctorAppointmentNotes,
   completeDoctorAppointment,
+  cancelDoctorAppointment,
+  getDoctorPaidAppointments,
 } from "../features/user/appointmentApi";
+import { extractApiErrorMessage } from "../utils/errors";
+import { sortAppointmentsByDateTime } from "../utils/appointments";
+import { formatTimeHHmm } from "../utils/dateTime";
+import { normalizeStatus } from "../utils/status";
+import { getDefaultDoctorProfileForm } from "../utils/forms";
 
 
 function DoctorDashboard() {
@@ -24,12 +32,7 @@ function DoctorDashboard() {
     const [needsProfile, setNeedsProfile] = useState(false);
     const [isEditingProfile, setIsEditingProfile] = useState(false);
 
-    const [profileForm, setProfileForm] = useState({
-        firstName: "",
-        lastName: "",
-        specialty: "",
-        phone: "",
-    });
+    const [profileForm, setProfileForm] = useState(getDefaultDoctorProfileForm());
 
     const [patients, setPatients] = useState([]);
     const [historyAppointments, setHistoryAppointments] = useState([]);
@@ -40,6 +43,21 @@ function DoctorDashboard() {
     const [actionLoadingId, setActionLoadingId] = useState(null);
     const [profileLoading, setProfileLoading] = useState(false);
     const [error, setError] = useState("");
+    const [editingNotesId, setEditingNotesId] = useState(null);
+    const [showUpcomingAppointments, setShowUpcomingAppointments] = useState(false);
+    const [showAppointmentsHistory, setShowAppointmentsHistory] = useState(false);
+    const [showMyPatients, setShowMyPatients] = useState(false);
+    const [showAllAppointments, setShowAllAppointments] = useState(false);
+    const [paidAppointmentIds, setPaidAppointmentIds] = useState(new Set());
+    const [hoveredUnpaidHistoryId, setHoveredUnpaidHistoryId] = useState(null);
+
+    const [filteredAppointments, setFilteredAppointments] = useState([]);
+    const [statusFilter, setStatusFilter] = useState("NONE");
+
+    const centeredTableStyle = { borderCollapse: "collapse", width: "100%", textAlign: "center", fontSize: "16px" };
+    const centeredCellStyle = { textAlign: "center", verticalAlign: "middle", fontSize: "16px" };
+    const allAppointments = sortAppointmentsByDateTime([...upcomingAppointments, ...historyAppointments]);
+
 
     const handleLogout = () => {
         dispatch(logout());
@@ -53,19 +71,21 @@ function DoctorDashboard() {
     };
 
     const loadDoctorLists = async() => { 
-        const [patientsData, historyData, upcomingData] = await Promise.all([
+        const [patientsData, historyData, upcomingData, paidData] = await Promise.all([
             getMyPatients(),
-            getDoctorAppointmentHistory(),
+            getDoctorAppointmentsHistory(),
             getDoctorUpcomingAppointments(),
+            getDoctorPaidAppointments(),
         ]);
 
         setPatients(patientsData);
         setHistoryAppointments(historyData);
         setUpcomingAppointments(upcomingData);
+        setPaidAppointmentIds(new Set((paidData || []).map((a) => a.id)));
 
         const notesMap ={}; 
         upcomingData.forEach((a) => {
-            notesMap[a.id] = a.notes || "";
+            notesMap[a.id] = a.doctorNotes || "";
         });
         setNotesById(notesMap);
     }
@@ -90,16 +110,10 @@ function DoctorDashboard() {
             await loadDoctorLists();
         } catch (error){ 
             if (error.response?.status === 404) {
+                setDoctor(null);
                 setNeedsProfile(true);
             } else {
-                const msg =
-                    error.response?.data?.message ||
-                    (typeof error.response?.data === "string" ? error.response.data : null) ||
-                    error.message ||
-                    "Request failed";
-
-                setError(msg);
-
+                setError(extractApiErrorMessage(error));
             }
         } finally {
             setLoading(false);
@@ -109,6 +123,22 @@ function DoctorDashboard() {
     useEffect(() => {
         loadDoctorData();
     },[]);
+
+    useEffect(() => {
+        let mounted = true;
+
+        (async () => {
+            try {
+                await loadFilteredAppointments(statusFilter);
+            } catch (error) {
+                if (mounted) setError(extractApiErrorMessage(error));
+            }
+        })();
+
+        return () => {
+            mounted = false;
+        };
+    }, [statusFilter]);
 
 
     const handleCreateProfile = async (e) => {
@@ -126,13 +156,7 @@ function DoctorDashboard() {
 
             await loadDoctorData();
         } catch (error){
-            const msg =
-                    error.response?.data?.message ||
-                    (typeof error.response?.data === "string" ? error.response.data : null) ||
-                    error.message ||
-                    "Request failed";
-
-            setError(msg);
+            setError(extractApiErrorMessage(error));
         } finally {
             setProfileLoading(false);
         }
@@ -154,19 +178,14 @@ function DoctorDashboard() {
             setDoctor(updated);
             setIsEditingProfile(false);
         } catch (error){
-            const msg =
-                    error.response?.data?.message ||
-                    (typeof error.response?.data === "string" ? error.response.data : null) ||
-                    error.message ||
-                    "Request failed";
-
-            setError(msg);
+            setError(extractApiErrorMessage(error));
         } finally {
             setProfileLoading(false);
         }
     }
 
     const onSaveNotes = async (appointmentId) =>{
+        setEditingNotesId(null);
         setActionLoadingId(appointmentId);
         setError("");
 
@@ -174,17 +193,25 @@ function DoctorDashboard() {
             const notes = notesById[appointmentId] ?? "";
             await updateDoctorAppointmentNotes(appointmentId, notes);
             await loadDoctorLists();
+            await loadFilteredAppointments(statusFilter);
         } catch (error){
-            const msg =
-                    error.response?.data?.message ||
-                    (typeof error.response?.data === "string" ? error.response.data : null) ||
-                    error.message ||
-                    "Request failed";
-
-            setError(msg);
+            setError(extractApiErrorMessage(error));
         } finally {
             setActionLoadingId(null);
         }
+    };
+
+    const onStartNotesEdit = (appointmentId) => {
+        setEditingNotesId(appointmentId);
+    };
+
+    const onCancelNotesEdit = (appointmentId) => {
+        const current = upcomingAppointments.find((a) => a.id === appointmentId);
+        setNotesById((prev) => ({
+            ...prev,
+            [appointmentId]: current?.doctorNotes || "",
+        }));
+        setEditingNotesId(null);
     };
 
     const onComplete = async (appointmentId) =>{
@@ -194,18 +221,59 @@ function DoctorDashboard() {
         try {
             await completeDoctorAppointment(appointmentId);
             await loadDoctorLists();
+            await loadFilteredAppointments(statusFilter);
         } catch (error){
-            const msg =
-                    error.response?.data?.message ||
-                    (typeof error.response?.data === "string" ? error.response.data : null) ||
-                    error.message ||
-                    "Request failed";
-
-            setError(msg);
+            setError(extractApiErrorMessage(error));
         }finally {
             setActionLoadingId(null);
         }
     };
+
+    const onCompleteFromHistory = async (appointmentId) => {
+        if (!paidAppointmentIds.has(appointmentId)) {
+            setError("Appointment cannot be completed unless fully paid");
+            return;
+        }
+        await onComplete(appointmentId);
+    };
+
+    const loadFilteredAppointments = async (status) => {
+        if (status === "NONE") {
+            setFilteredAppointments([]);
+            return;
+        }
+
+        if (status === "ALL") {
+            const [scheduled, completed, cancelled] = await Promise.all([
+                getDoctorAppointmentsByStatus("SCHEDULED"),
+                getDoctorAppointmentsByStatus("COMPLETED"),
+                getDoctorAppointmentsByStatus("CANCELLED"),
+            ]);
+
+            setFilteredAppointments(sortAppointmentsByDateTime([...scheduled, ...completed, ...cancelled]));
+            return;
+        }
+
+        const data = await getDoctorAppointmentsByStatus(normalizeStatus(status));
+        setFilteredAppointments(data);
+    };
+
+
+    const onCancel = async (appointmentId) => {
+        setActionLoadingId(appointmentId);
+        setError("");
+        try {
+            await cancelDoctorAppointment(appointmentId);
+            await loadDoctorLists();
+            await loadFilteredAppointments(statusFilter);
+        } catch (error) {
+            setError(extractApiErrorMessage(error));
+        } finally {
+            setActionLoadingId(null);
+        }
+    };
+
+
 
     return (
         <div style={{ padding: "24px" }}>
@@ -367,135 +435,356 @@ function DoctorDashboard() {
                         )}
                     </section>
 
+                    <section style={{ marginTop: "24px" }}>
+                        <button onClick={() => navigate("/doctor/payments")}>
+                            Open Payments Page
+                        </button>
+                    </section>
+
+                    <section style={{ marginTop: "24px" }}>
+                        <h2>Filter Appointments By Status</h2>
+                        <select
+                            value={statusFilter}
+                            onChange={(e) => setStatusFilter(e.target.value)}
+                            style={{ padding: "8px", minWidth: "220px" }}
+                        >
+                            <option value="NONE">-</option>
+                            <option value="ALL">All</option>
+                            <option value="SCHEDULED">Scheduled</option>
+                            <option value="COMPLETED">Completed</option>
+                            <option value="CANCELLED">Cancelled</option>
+                        </select>
+                        
+                        {statusFilter !== "NONE" && (
+                            <div style={{ marginTop: "12px" }}>
+                                {filteredAppointments.length === 0 ? (
+                                    <p>No appointments found for selected status.</p>
+                                ) : (
+                                    <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%" }}>
+                                        <thead>
+                                            <tr>
+                                                <th>ID</th>
+                                                <th>Date</th>
+                                                <th>Time</th>
+                                                <th>Status</th>
+                                                <th>Patient</th>
+                                                <th>Service</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filteredAppointments.map((a) => (
+                                                <tr key={a.id}>
+                                                    <td>{a.id}</td>
+                                                    <td>{a.appointmentDate}</td>
+                                                    <td>{formatTimeHHmm(a.appointmentTime)}</td>
+                                                    <td>{a.status}</td>
+                                                    <td>{a.patientName || a.patientId}</td>
+                                                    <td>{a.serviceName || a.serviceId}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
+                        )}
+                    </section>
+
                     <section style={{ marginTop: "24px"}}>
                         <h2>Upcoming Appointments</h2>
-
-                        {upcomingAppointments.length === 0 ? (
-                            <p>No upcoming appointments.</p>
+                        {!showUpcomingAppointments ? (
+                            <button onClick={() => setShowUpcomingAppointments(true)}>Show Upcoming Appointments</button>
                         ) : (
-                            <table 
-                                border="1"
-                                cellPadding="8"
-                                style={{ borderCollapse:"collapse", width: "100%", maxWidth: "1100px"}}
-                            >
-                                <thead>
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>Date</th>
-                                        <th>Time</th>
-                                        <th>Status</th>
-                                        <th>Patient</th>
-                                        <th>Service</th>
-                                        <th>Notes</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {upcomingAppointments.map((a) => (
-                                        <tr key={a.id}>
-                                            <td>{a.id}</td>
-                                            <td>{a.appointmentDate}</td>
-                                            <td>{a.appointmentTime}</td>
-                                            <td>{a.status}</td>
-                                            <td>{a.patientName}</td>
-                                            <td>{a.serviceName}</td>
-                                            <td>
-                                                <input
-                                                    value={notesById[a.id] ?? ""}
-                                                    onChange={(e) =>
-                                                        setNotesById((prev) => ({
-                                                            ...prev, [a.id]:e.target.value,
-                                                        }))
-                                                    }
-                                                    style={{ width:"220px"}}
-                                                />
-                                            </td>
-                                            <td>
-                                                <button 
-                                                    onClick={() => onSaveNotes(a.id)}
-                                                    disabled={actionLoadingId === a.id}
-                                                    style={{ marginRight: "8px" }}
-                                                >
-                                                    {actionLoadingId === a.id ? "Saving..." : "Save Notes"}
-                                                </button>
-
-                                                <button
-                                                    onClick={()=> onComplete(a.id)}
-                                                    disabled={actionLoadingId === a.id}
-                                                >
-                                                    {actionLoadingId === a.id ? "Completing..." : "Complete"}
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                            <>
+                                {upcomingAppointments.length === 0 ? (
+                                    <p>No upcoming appointments.</p>
+                                ) : (
+                                    <table border="1" cellPadding="8" style={centeredTableStyle}>
+                                        <thead>
+                                            <tr>
+                                                <th style={centeredCellStyle}>ID</th>
+                                                <th style={centeredCellStyle}>Date</th>
+                                                <th style={centeredCellStyle}>Time</th>
+                                                <th style={centeredCellStyle}>Status</th>
+                                                <th style={centeredCellStyle}>Patient</th>
+                                                <th style={centeredCellStyle}>Service</th>
+                                                <th style={centeredCellStyle}>My Notes</th>
+                                                <th style={centeredCellStyle}>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {upcomingAppointments.map((a) => (
+                                                <tr key={a.id}>
+                                                    <td style={centeredCellStyle}>{a.id}</td>
+                                                    <td style={centeredCellStyle}>{a.appointmentDate}</td>
+                                                    <td style={centeredCellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
+                                                    <td style={centeredCellStyle}>{a.status}</td>
+                                                    <td style={centeredCellStyle}>{a.patientName}</td>
+                                                    <td style={centeredCellStyle}>{a.serviceName}</td>
+                                                    <td style={centeredCellStyle}>
+                                                        <div
+                                                            style={{
+                                                                minWidth: "240px",
+                                                                margin: "0 auto",
+                                                                border: "1px solid #d9e1ea",
+                                                                borderRadius: "10px",
+                                                                backgroundColor: "#f8fbff",
+                                                                padding: "6px 10px",
+                                                            }}
+                                                        >
+                                                            {editingNotesId === a.id ? (
+                                                                <input
+                                                                    value={notesById[a.id] ?? ""}
+                                                                    onChange={(e) =>
+                                                                        setNotesById((prev) => ({
+                                                                            ...prev,
+                                                                            [a.id]: e.target.value,
+                                                                        }))
+                                                                    }
+                                                                    placeholder="Add your notes..."
+                                                                    style={{
+                                                                        width: "100%",
+                                                                        border: "none",
+                                                                        outline: "none",
+                                                                        background: "transparent",
+                                                                        padding: "4px 0",
+                                                                        textAlign: "center",
+                                                                        fontSize: "16px",
+                                                                    }}
+                                                                />
+                                                            ) : (
+                                                                <div style={{ padding: "4px 0", fontSize: "16px", textAlign: "center" }}>
+                                                                    {notesById[a.id] || a.doctorNotes || "-"}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td style={centeredCellStyle}>
+                                                        {editingNotesId === a.id ? (
+                                                            <>
+                                                                <button
+                                                                    onClick={() => onSaveNotes(a.id)}
+                                                                    disabled={actionLoadingId === a.id}
+                                                                    style={{ marginRight: "8px" }}
+                                                                >
+                                                                    {actionLoadingId === a.id ? "Saving..." : "Save Notes"}
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => onCancelNotesEdit(a.id)}
+                                                                    disabled={actionLoadingId === a.id}
+                                                                    style={{ marginRight: "8px" }}
+                                                                >
+                                                                    Cancel Edit
+                                                                </button>
+                                                            </>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => onStartNotesEdit(a.id)}
+                                                                disabled={actionLoadingId === a.id}
+                                                                style={{ marginRight: "8px" }}
+                                                            >
+                                                                Update Notes
+                                                            </button>
+                                                        )}
+                                                        <button
+                                                            onClick={() => onCancel(a.id)}
+                                                            disabled={actionLoadingId === a.id}
+                                                        >
+                                                            {actionLoadingId === a.id ? "Cancelling..." : "Cancel Appointment"}
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                                <button onClick={() => setShowUpcomingAppointments(false)} style={{ marginTop: "10px" }}>
+                                    Hide Upcoming Appointments
+                                </button>
+                            </>
                         )}
                     </section>
 
                     <section style ={{marginTop: "24px"}}>
-                        <h2>Appointment HIstory</h2>
-                        {historyAppointments.length === 0? (
-                            <p>No completed appointments yet.</p>
+                        <h2>Appointments History</h2>
+                        {!showAppointmentsHistory ? (
+                            <button onClick={() => setShowAppointmentsHistory(true)}>Show Appointments History</button>
                         ) : (
-                            <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%" }}>
-                                <thead>
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>Date</th>
-                                        <th>Time</th>
-                                        <th>Status</th>
-                                        <th>Patient</th>
-                                        <th>Service</th>
-                                        <th>Notes</th>
-                                    </tr>
-                                    </thead>
-                                    <tbody>
-                                    {historyAppointments.map((a) => (
-                                        <tr key={a.id}>
-                                        <td>{a.id}</td>
-                                        <td>{a.appointmentDate}</td>
-                                        <td>{a.appointmentTime}</td>
-                                        <td>{a.status}</td>
-                                        <td>{a.patientName || a.patientId}</td>
-                                        <td>{a.serviceName || a.serviceId}</td>
-                                        <td>{a.notes || "-"}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                            <>
+                                {historyAppointments.length === 0? (
+                                    <p>No past appointments yet.</p>
+                                ) : (
+                                    <table border="1" cellPadding="8" style={centeredTableStyle}>
+                                        <thead>
+                                            <tr>
+                                                <th style={centeredCellStyle}>ID</th>
+                                                <th style={centeredCellStyle}>Date</th>
+                                                <th style={centeredCellStyle}>Time</th>
+                                                <th style={centeredCellStyle}>Status</th>
+                                                <th style={centeredCellStyle}>Patient</th>
+                                                <th style={centeredCellStyle}>Service</th>
+                                                <th style={centeredCellStyle}>My Notes</th>
+                                                <th style={centeredCellStyle}>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {historyAppointments.map((a) => (
+                                                <tr key={a.id}>
+                                                    <td style={centeredCellStyle}>{a.id}</td>
+                                                    <td style={centeredCellStyle}>{a.appointmentDate}</td>
+                                                    <td style={centeredCellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
+                                                    <td style={centeredCellStyle}>{a.status}</td>
+                                                    <td style={centeredCellStyle}>{a.patientName || a.patientId}</td>
+                                                    <td style={centeredCellStyle}>{a.serviceName || a.serviceId}</td>
+                                                    <td style={centeredCellStyle}>{a.doctorNotes || "-"}</td>
+                                                    <td style={centeredCellStyle}>
+                                                        {a.status === "SCHEDULED" ? (
+                                                            <span
+                                                                style={{
+                                                                    display: "inline-flex",
+                                                                    flexDirection: "column",
+                                                                    alignItems: "center",
+                                                                    position: "relative",
+                                                                    cursor: paidAppointmentIds.has(a.id) ? "pointer" : "not-allowed",
+                                                                }}
+                                                                onMouseEnter={() => {
+                                                                    if (!paidAppointmentIds.has(a.id)) {
+                                                                        setHoveredUnpaidHistoryId(a.id);
+                                                                    }
+                                                                }}
+                                                                onMouseLeave={() => {
+                                                                    if (hoveredUnpaidHistoryId === a.id) {
+                                                                        setHoveredUnpaidHistoryId(null);
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <button
+                                                                    onClick={() => onCompleteFromHistory(a.id)}
+                                                                    disabled={actionLoadingId === a.id}
+                                                                    style={{
+                                                                        opacity: paidAppointmentIds.has(a.id) ? 1 : 0.55,
+                                                                        cursor: paidAppointmentIds.has(a.id) ? "pointer" : "not-allowed",
+                                                                        pointerEvents: paidAppointmentIds.has(a.id) ? "auto" : "none",
+                                                                    }}
+                                                                >
+                                                                    {actionLoadingId === a.id ? "Completing..." : "Complete"}
+                                                                </button>
+                                                                {!paidAppointmentIds.has(a.id) && hoveredUnpaidHistoryId === a.id && (
+                                                                    <span
+                                                                        style={{
+                                                                            position: "absolute",
+                                                                            bottom: "calc(100% + 8px)",
+                                                                            left: "50%",
+                                                                            transform: "translateX(-50%)",
+                                                                            backgroundColor: "#111827",
+                                                                            color: "#fff",
+                                                                            padding: "6px 8px",
+                                                                            borderRadius: "6px",
+                                                                            fontSize: "12px",
+                                                                            whiteSpace: "nowrap",
+                                                                            zIndex: 5,
+                                                                        }}
+                                                                    >
+                                                                        Appointment is not fully paid
+                                                                    </span>
+                                                                )}
+                                                            </span>
+                                                        ) : (
+                                                            "-"
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                                <button onClick={() => setShowAppointmentsHistory(false)} style={{ marginTop: "10px" }}>
+                                    Hide Appointments History
+                                </button>
+                            </>
                         )}
                     </section>
                     
                     <section style={{ marginTop: "24px", marginBottom: "24px" }}>
-                        <h2>My Patients</h2>
-                        {patients.length === 0 ? (
-                            <p>No patients found.</p>
+                        <h2>All The Appointments</h2>
+                        {!showAllAppointments ? (
+                            <button onClick={() => setShowAllAppointments(true)}>Show All The Appointments</button>
                         ) : (
-                            <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%" }}>
-                                <thead>
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>First Name</th>
-                                        <th>Last Name</th>
-                                        <th>Phone</th>
-                                        <th>Date Of Birth</th>
-                                        <th>Notes</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {patients.map((p) => (
-                                        <tr key={p.id}>
-                                            <td>{p.id}</td>
-                                            <td>{p.firstName}</td>
-                                            <td>{p.lastName}</td>
-                                            <td>{p.phone}</td>
-                                            <td>{p.dateOfBirth}</td>
-                                            <td>{p.notes || "-"}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                            <>
+                                {allAppointments.length === 0 ? (
+                                    <p>No appointments.</p>
+                                ) : (
+                                    <table border="1" cellPadding="8" style={centeredTableStyle}>
+                                        <thead>
+                                            <tr>
+                                                <th style={centeredCellStyle}>ID</th>
+                                                <th style={centeredCellStyle}>Date</th>
+                                                <th style={centeredCellStyle}>Time</th>
+                                                <th style={centeredCellStyle}>Status</th>
+                                                <th style={centeredCellStyle}>Patient</th>
+                                                <th style={centeredCellStyle}>Service</th>
+                                                <th style={centeredCellStyle}>My Notes</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {allAppointments.map((a) => (
+                                                <tr key={a.id}>
+                                                    <td style={centeredCellStyle}>{a.id}</td>
+                                                    <td style={centeredCellStyle}>{a.appointmentDate}</td>
+                                                    <td style={centeredCellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
+                                                    <td style={centeredCellStyle}>{a.status}</td>
+                                                    <td style={centeredCellStyle}>{a.patientName || a.patientId}</td>
+                                                    <td style={centeredCellStyle}>{a.serviceName || a.serviceId}</td>
+                                                    <td style={centeredCellStyle}>{a.doctorNotes || "-"}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                                <button onClick={() => setShowAllAppointments(false)} style={{ marginTop: "10px" }}>
+                                    Hide All The Appointments
+                                </button>
+                            </>
+                        )}
+                    </section>
+
+                    <section style={{ marginTop: "24px", marginBottom: "24px" }}>
+                        <h2>My Patients</h2>
+                        {!showMyPatients ? (
+                            <button onClick={() => setShowMyPatients(true)}>Show My Patients</button>
+                        ) : (
+                            <>
+                                {patients.length === 0 ? (
+                                    <p>No patients found.</p>
+                                ) : (
+                                    <table border="1" cellPadding="8" style={centeredTableStyle}>
+                                        <thead>
+                                            <tr>
+                                                <th style={centeredCellStyle}>ID</th>
+                                                <th style={centeredCellStyle}>First Name</th>
+                                                <th style={centeredCellStyle}>Last Name</th>
+                                                <th style={centeredCellStyle}>Phone</th>
+                                                <th style={centeredCellStyle}>Date Of Birth</th>
+                                                <th style={centeredCellStyle}>Notes</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {patients.map((p) => (
+                                                <tr key={p.id}>
+                                                    <td style={centeredCellStyle}>{p.id}</td>
+                                                    <td style={centeredCellStyle}>{p.firstName}</td>
+                                                    <td style={centeredCellStyle}>{p.lastName}</td>
+                                                    <td style={centeredCellStyle}>{p.phone}</td>
+                                                    <td style={centeredCellStyle}>{p.dateOfBirth}</td>
+                                                    <td style={centeredCellStyle}>{p.notes || "-"}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                                <button onClick={() => setShowMyPatients(false)} style={{ marginTop: "10px" }}>
+                                    Hide My Patients
+                                </button>
+                            </>
                         )}
                     </section>
                 </>

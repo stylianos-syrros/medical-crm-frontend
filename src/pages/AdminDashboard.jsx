@@ -10,13 +10,14 @@ import { createUser,
     updateUser, 
     changePassword,
     deleteUser,
-} from "../features/user/usersApi"; 
+} from "../features/user/adminApi"; 
 import {
     createMedicalService,
     deleteMedicalService,
     getAllMedicalServices,
     updateMedicalService,
 } from "../features/user/medicalServiceApi";
+import { extractApiErrorMessage } from "../utils/errors";
 
 function AdminDashboard() {
     const navigate = useNavigate();
@@ -26,17 +27,6 @@ function AdminDashboard() {
         dispatch(logout());
         navigate("/login");
     };
-
-    const getErrorMessage = (error, fallback) =>
-        error.response?.data?.message ||
-        (typeof error.response?.data === "string" ? error.response.data : null) ||
-        (error.response?.data && typeof error.response?.data === "object"
-            ? Object.values(error.response.data).flat().join(" | ")
-            : null) ||
-        error.message ||
-        fallback;
-
-
 
     const [createForm, setCreateForm] = useState({
         username: "",
@@ -82,9 +72,7 @@ function AdminDashboard() {
 
             await loadUsers();
         } catch (error) {
-            setCreateError(
-                error.response?.data?.message || error.response?.data || error.message || "Failed to create user"
-            );
+            setCreateError(extractApiErrorMessage(error, "Failed to create user"));
         } finally {
             setCreateLoading(false);
         }
@@ -105,9 +93,7 @@ function AdminDashboard() {
             const data = await getAllUsers();
             setUsers(data);
         } catch (error){
-            setUsersError(
-                error.response?.data?.message || error.response?.data || error.message || "Failed to load users"
-            );
+            setUsersError(extractApiErrorMessage(error, "Failed to load users"));
         }
         finally {
             setLoadingUsers(false)
@@ -136,9 +122,7 @@ function AdminDashboard() {
             }
             await loadUsers();
         } catch (error){
-            setActionError(
-                error.response?.data?.message || error.response?.data || error.message || "Failed to toggle user status"
-            );
+            setActionError(extractApiErrorMessage(error, "Failed to toggle user status"));
         } finally {
             setActionLoadingId(null);
         }
@@ -167,9 +151,7 @@ function AdminDashboard() {
             await changeUserRole(user.id, role);
             await loadUsers();
         } catch (error){
-            setRoleError(
-                error.response?.data?.message || error.response?.data || error.message || "Failed to change user's role"
-            );
+            setRoleError(extractApiErrorMessage(error, "Failed to change user's role"));
         } finally{
             setRoleChangingId(null);
         } 
@@ -209,9 +191,7 @@ function AdminDashboard() {
             await loadUsers();
             cancelEditUser();
         } catch (error) {
-            setEditError(
-                error.response?.data?.message || error.response?.data || error.message || "Failed to update user"
-            );
+            setEditError(extractApiErrorMessage(error, "Failed to update user"));
         } finally {
             setEditLoading(false);
         }
@@ -255,19 +235,7 @@ function AdminDashboard() {
             setPasswordSuccess("Password changed successfully");
             cancelChangePassword();
         } catch (error) {
-            const data = error.response?.data;
-
-            const message =
-                typeof data === "string"
-                    ? data
-                    : data?.message ||
-                    (data && typeof data === "object"
-                        ? Object.values(data).flat().join(" | ")
-                        : "") ||
-                    error.message ||
-                    "Failed to change password";
-
-            setPasswordError(message);
+            setPasswordError(extractApiErrorMessage(error, "Failed to change password"));
         } finally {
             setPasswordLoading(false);
         }
@@ -292,12 +260,7 @@ function AdminDashboard() {
             await deleteUser(user.id);
             await loadUsers();
         } catch (error) {
-            setDeleteError(
-            error.response?.data?.message ||
-                error.response?.data ||
-                error.message ||
-                "Failed to delete user"
-            );
+            setDeleteError(extractApiErrorMessage(error, "Failed to delete user"));
         } finally {
             setDeleteLoadingId(null);
             setDeleteTarget(null);
@@ -338,7 +301,7 @@ function AdminDashboard() {
             const data = await getAllMedicalServices();
             setServices(data);
         } catch (error) {
-            setServicesError(getErrorMessage(error, "Failed to load medical services"));
+            setServicesError(extractApiErrorMessage(error, "Failed to load medical services"));
         } finally {
             setServicesLoading(false);
         }
@@ -367,7 +330,7 @@ function AdminDashboard() {
             setServiceCreateForm({ name: "", description: "", price: "", duration: "" });
             await loadMedicalServices();
         } catch (error) {
-            setServiceCreateError(getErrorMessage(error, "Failed to create medical service"));
+            setServiceCreateError(extractApiErrorMessage(error, "Failed to create medical service"));
         } finally {
             setServiceCreateLoading(false);
         }
@@ -413,7 +376,7 @@ function AdminDashboard() {
             await loadMedicalServices();
             cancelEditService();
         } catch (error) {
-            setServiceEditError(getErrorMessage(error, "Failed to update medical service"));
+            setServiceEditError(extractApiErrorMessage(error, "Failed to update medical service"));
         } finally {
             setServiceActionLoadingId(null);
         }
@@ -430,7 +393,7 @@ function AdminDashboard() {
             setServiceCreateSuccess("Medical service deleted successfully");
             await loadMedicalServices();
         } catch (error) {
-            setServicesError(getErrorMessage(error, "Failed to delete medical service"));
+            setServicesError(extractApiErrorMessage(error, "Failed to delete medical service"));
         } finally {
             setServiceActionLoadingId(null);
         }
@@ -468,6 +431,12 @@ function AdminDashboard() {
             <button onClick={handleLogout} style={{ marginBottom: "20px"}}> 
                 Logout
             </button>
+
+            <section style={{ marginBottom: "20px" }}>
+                <button onClick={() => navigate("/admin/payments")}>
+                    Open Payments Page
+                </button>
+            </section>
 
             <section style={{ marginBottom: "28px", maxWidth: "520px" }}>
                 <h2>Create New User</h2>

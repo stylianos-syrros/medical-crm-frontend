@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { setCredentials, setAuthError, setAuthLoading, clearAuthError } from "../features/auth/authSlice";
 import { loginUser } from "../features/auth/authApi";
 import { parseRoleFromToken } from "../features/auth/tokenUtils";
+import { extractApiErrorMessage } from "../utils/errors";
 
 function LoginPage(){
     const navigate = useNavigate();
@@ -50,7 +51,7 @@ function LoginPage(){
             }
         } catch (error){
             dispatch(
-                setAuthError(error.response?.data?.message || error.response?.data || error.message || "Login failed")
+                setAuthError(extractApiErrorMessage(error, "Login failed"))
             );
         }finally{
             dispatch(setAuthLoading(false));

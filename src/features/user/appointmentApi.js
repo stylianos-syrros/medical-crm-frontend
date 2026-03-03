@@ -7,7 +7,7 @@ export async function bookMyAppointment(payload) {
 }
 
 export async function cancelMyAppointment(appointmentId){
-  await client.delete(`/api/appointments/patient/me/${appointmentId}`);
+  await client.delete(`/api/appointments/patient/me/${appointmentId}/cancel`);
 }
 
 export async function rescheduleMyAppointment(appointmentId, payload) {
@@ -22,6 +22,17 @@ export async function getPatientUpcomingAppointments() {
 export async function getPatientAppointmentsHistory() {
   const response = await client.get("/api/appointments/patient/me/history");
   return response.data;
+}
+
+export async function getDoctorScheduledAppointmentsForDate(doctorId, date) {
+  const response = await client.get(`/api/appointments/patient/me/doctor/${doctorId}/date`, {
+    params: { date },
+  });
+  return response.data;
+}
+
+export async function updatePatientAppointmentNotes(appointmentId, notes) {
+  await client.put(`/api/appointments/patient/me/${appointmentId}/notes`, { notes });
 }
 
 // DOCTOR
@@ -52,6 +63,11 @@ export async function completeDoctorAppointment(appointmentId) {
 
 export async function updateDoctorAppointmentNotes(appointmentId, notes) {
   await client.put(`/api/appointments/doctor/me/${appointmentId}/notes`, { notes });
+}
+
+export async function getDoctorPaidAppointments() {
+  const response = await client.get("/api/payments/doctor/me/paid");
+  return response.data;
 }
 
 // ADMIN

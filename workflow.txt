@@ -64,3 +64,17 @@ http://localhost:5173
 
 16. Validation step:
 - frontend build succeeds with `npm run build` after these fixes.
+
+
+####
+
+Commit the changes
+Fully check the payment system
+Polish the frontend, make it nicer(styles folder)
+What is memo
+Make the frontend tests
+Use docker so the app runs all together
+Overall understanding of how the whole project works
+1) backend with database
+2) frontend
+Learn how to talk about api calls,endpoints ...

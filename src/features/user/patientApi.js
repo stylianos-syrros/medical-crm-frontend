@@ -19,3 +19,8 @@ export async function getMyDoctors() {
     const response = await client.get(`/api/patients/me/doctors`);
     return response.data;
 }
+
+export async function getAllDoctorsForBooking() {
+    const response = await client.get(`/api/patients/me/doctors/all`);
+    return response.data;
+}
