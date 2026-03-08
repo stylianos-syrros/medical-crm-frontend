@@ -21,13 +21,13 @@ import { extractApiErrorMessage } from "../utils/errors";
 import { formatDateDDMMYYYY, formatTimeHHmm, isFutureAppointment } from "../utils/dateTime";
 import { filterAppointmentsByStatus, sortAppointmentsByDateTime } from "../utils/appointments";
 import { getDefaultPatientProfileForm } from "../utils/forms";
-import { getAnchoredActionMessageStyle, useAnchoredActionMessage } from "../utils/actionMessage";
+import { useAnchoredActionMessage } from "../utils/actionMessage";
 
 
 function PatientDashboard() {
     const navigate = useNavigate();
     const dispatch = useDispatch();
-    const { anchor, message, captureActionAnchor, showActionMessage, clearActionMessage } =
+    const { message, captureActionAnchor, showActionMessage, clearActionMessage } =
         useAnchoredActionMessage();
 
     const [patient, setPatient] = useState(null);
@@ -88,15 +88,18 @@ function PatientDashboard() {
             getMyUnpaidAppointments(),
         ]);
 
+        const sortedUpcoming = sortAppointmentsByDateTime(upcomingData || []);
+        const sortedHistory = sortAppointmentsByDateTime(historyData || []);
+
         setDoctors(doctorsData);
-        setUpcomingAppointments(upcomingData);
-        setHistoryAppointments(historyData);
+        setUpcomingAppointments(sortedUpcoming);
+        setHistoryAppointments(sortedHistory);
         setMedicalServices(servicesData);
-        const allData = sortAppointmentsByDateTime([...upcomingData, ...historyData]);
+        const allData = sortAppointmentsByDateTime([...sortedUpcoming, ...sortedHistory]);
         setAllAppointments(allData);
 
         const notesMap = {};
-        [...upcomingData, ...historyData].forEach((a) => {
+        [...sortedUpcoming, ...sortedHistory].forEach((a) => {
             notesMap[a.id] = a.patientNotes || "";
         });
         setNotesByAppointmentId(notesMap);
@@ -316,26 +319,40 @@ function PatientDashboard() {
         if (appointmentsWithPayments.has(Number(appointment?.id))) return "Paid";
         return "-";
     };
+    const getAppointmentStatusClass = (status) => {
+        if (status === "SCHEDULED") return "status-scheduled";
+        if (status === "COMPLETED") return "status-completed";
+        if (status === "CANCELLED") return "status-cancelled";
+        return "status-cancelled";
+    };
 
     return (
-        <div style={{ padding: "24px" }} onClickCapture={handlePageClickCapture}>
-            <h1>Patient Dashboard</h1>
+        <div className="page-container page-accent-patient space-y-6" onClickCapture={handlePageClickCapture}>
+            <div className="card top-actions-bar hero-card hero-patient flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <h1>Patient Dashboard</h1>
+                    <p className="mt-1 text-sm text-slate-500">Your bookings, payments, and medical schedule.</p>
+                </div>
+                <button onClick={handleLogout} className="btn-secondary w-full sm:w-auto">
+                    Logout
+                </button>
+            </div>
             {message?.text && (
-                <div style={getAnchoredActionMessageStyle(message.type, anchor)}>
+                <div className={`alert ${message.type === "success" ? "alert-success" : "alert-error"}`}>
                     {message.text}
                 </div>
             )}
 
-            <button onClick={handleLogout} style={{ marginBottom: "16px" }}>
-                Logout
-            </button>
-
-            {loading && <p>Loading...</p>}
+            {loading && (
+                <div className="card">
+                    <p className="text-sm font-medium text-slate-600">Loading dashboard data...</p>
+                </div>
+            )}
             {!loading && needsProfile && (
-                <section style={{ marginTop: "16px", maxWidth: "520px" }}>
+                <section className="card max-w-2xl">
                     <h2>Create Your Profile</h2>
 
-                    <form onSubmit={handleCreateProfile}>
+                    <form onSubmit={handleCreateProfile} className="mt-4 space-y-4">
                         <div style={{ marginBottom: "10px" }}>
                             <label style={labelStyle}>First Name</label>
                             <input 
@@ -398,7 +415,7 @@ function PatientDashboard() {
 
             {!loading && !needsProfile && patient && (
                 <>
-                    <section style={{ marginTop: "16px", maxWidth: "520px" }}>
+                    <section className="card max-w-2xl">
                         <h2>My Profile</h2>
 
                         {!isEditingProfile ? (
@@ -522,19 +539,19 @@ function PatientDashboard() {
                         )}
                     </section>
 
-                    <section style={{ marginTop: "24px" }}>
+                    <section className="card">
                         <button onClick={() => navigate("/patient/appointments")} style={{ marginRight: "8px" }}>
                             Open Appointment Booking Page
                         </button>
                     </section>
 
-                    <section style={{ marginTop: "24px" }}>
+                    <section className="card">
                         <button onClick={() => navigate("/patient/payments")}>
                             Open Payments Page
                         </button>
                     </section>
 
-                    <section style={{ marginTop: "24px" }}>
+                    <section className="card">
                         <h2>Filter Appointments By Status</h2>
                         <select
                             value={statusFilter}
@@ -551,9 +568,10 @@ function PatientDashboard() {
                         {statusFilter !== "NONE" && (
                             <div style={{ marginTop: "12px" }}>
                                 {filteredAppointments.length === 0 ? (
-                                    <p>No appointments found for selected status.</p>
+                                    <div className="empty-state">No appointments found for selected status.</div>
                                 ) : (
-                                    <table border="1" cellPadding="8" style={centeredTableStyle}>
+                                    <div className="table-wrap">
+                                    <table style={centeredTableStyle}>
                                         <thead>
                                             <tr>
                                                 <th style={centeredCellStyle}>ID</th>
@@ -571,7 +589,9 @@ function PatientDashboard() {
                                                     <td style={centeredCellStyle}>{a.id}</td>
                                                     <td style={centeredCellStyle}>{formatDateDDMMYYYY(a.appointmentDate)}</td>
                                                     <td style={centeredCellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
-                                                    <td style={centeredCellStyle}>{a.status}</td>
+                                                    <td style={centeredCellStyle}>
+                                                        <span className={`status-badge ${getAppointmentStatusClass(a.status)}`}>{a.status}</span>
+                                                    </td>
                                                     <td style={centeredCellStyle}>{a.doctorName || a.doctorId}</td>
                                                     <td style={centeredCellStyle}>{a.serviceName || a.serviceId}</td>
                                                     <td style={centeredCellStyle}>{a.patientNotes || "-"}</td>
@@ -579,21 +599,23 @@ function PatientDashboard() {
                                             ))}
                                         </tbody>
                                     </table>
+                                    </div>
                                 )}
                             </div>
                         )}
                     </section>
 
-                    <section style={{ marginTop: "24px" }}>
+                    <section className="card">
                         <h2>Upcoming Appointments</h2>
                         {!showUpcomingAppointments ? (
                             <button onClick={() => setShowUpcomingAppointments(true)}>Show Upcoming Appointments</button>
                         ) : (
                             <>
                                 {upcomingAppointments.length === 0 ? (
-                                    <p>No upcoming appointments.</p>
+                                    <div className="empty-state">No upcoming appointments.</div>
                                 ) : (
-                                    <table border="1" cellPadding="8" style={centeredTableStyle}>
+                                    <div className="table-wrap">
+                                    <table style={centeredTableStyle}>
                                         <thead>
                                             <tr>
                                                 <th style={centeredCellStyle}>ID</th>
@@ -612,7 +634,9 @@ function PatientDashboard() {
                                                     <td style={centeredCellStyle}>{a.id}</td>
                                                     <td style={centeredCellStyle}>{formatDateDDMMYYYY(a.appointmentDate)}</td>
                                                     <td style={centeredCellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
-                                                    <td style={centeredCellStyle}>{a.status}</td>
+                                                    <td style={centeredCellStyle}>
+                                                        <span className={`status-badge ${getAppointmentStatusClass(a.status)}`}>{a.status}</span>
+                                                    </td>
                                                     <td style={centeredCellStyle}>{a.doctorName || a.doctorId}</td>
                                                     <td style={centeredCellStyle}>{a.serviceName || a.serviceId}</td>
                                                     <td style={centeredCellStyle}>
@@ -654,105 +678,105 @@ function PatientDashboard() {
                                                         </div>
                                                     </td>
                                                     <td style={centeredCellStyle}>
-                                                        {editingNotesId === a.id ? (
-                                                            <>
+                                                        <div className="actions-stack">
+                                                            {editingNotesId === a.id ? (
+                                                                <>
+                                                                    <button
+                                                                        onClick={() => onSaveAppointmentNotes(a.id)}
+                                                                        disabled={actionLoadingId === a.id}
+                                                                    >
+                                                                        {actionLoadingId === a.id ? "Saving..." : "Save Notes"}
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => onCancelNotesEdit(a.id)}
+                                                                        disabled={actionLoadingId === a.id}
+                                                                    >
+                                                                        Cancel Edit
+                                                                    </button>
+                                                                </>
+                                                            ) : (
                                                                 <button
-                                                                    onClick={() => onSaveAppointmentNotes(a.id)}
+                                                                    onClick={() => onStartNotesEdit(a.id)}
                                                                     disabled={actionLoadingId === a.id}
-                                                                    style={{ marginRight: "8px" }}
                                                                 >
-                                                                    {actionLoadingId === a.id ? "Saving..." : "Save Notes"}
+                                                                    Update Notes
                                                                 </button>
+                                                            )}
+                                                            {canCancelAppointment(a) ? (
                                                                 <button
-                                                                    onClick={() => onCancelNotesEdit(a.id)}
+                                                                    onClick={() => onCancelAppointment(a.id)}
                                                                     disabled={actionLoadingId === a.id}
-                                                                    style={{ marginRight: "8px" }}
                                                                 >
-                                                                    Cancel Edit
+                                                                    {actionLoadingId === a.id ? "Cancelling..." : "Cancel Appointment"}
                                                                 </button>
-                                                            </>
-                                                        ) : (
-                                                            <button
-                                                                onClick={() => onStartNotesEdit(a.id)}
-                                                                disabled={actionLoadingId === a.id}
-                                                                style={{ marginRight: "8px" }}
-                                                            >
-                                                                Update Notes
-                                                            </button>
-                                                        )}
-                                                        {canCancelAppointment(a) ? (
-                                                            <button
-                                                                onClick={() => onCancelAppointment(a.id)}
-                                                                disabled={actionLoadingId === a.id}
-                                                            >
-                                                                {actionLoadingId === a.id ? "Cancelling..." : "Cancel Appointment"}
-                                                            </button>
-                                                        ) : appointmentsWithPayments.has(Number(a?.id)) ? (
-                                                            <span
-                                                                style={{
-                                                                    display: "inline-flex",
-                                                                    flexDirection: "column",
-                                                                    alignItems: "center",
-                                                                    position: "relative",
-                                                                    cursor: "not-allowed",
-                                                                }}
-                                                                onMouseEnter={() => setHoveredPaidUpcomingCancelId(a.id)}
-                                                                onMouseLeave={() => {
-                                                                    if (hoveredPaidUpcomingCancelId === a.id) {
-                                                                        setHoveredPaidUpcomingCancelId(null);
-                                                                    }
-                                                                }}
-                                                            >
-                                                                <button
-                                                                    disabled
+                                                            ) : appointmentsWithPayments.has(Number(a?.id)) ? (
+                                                                <span
                                                                     style={{
-                                                                        opacity: 0.55,
+                                                                        display: "inline-flex",
+                                                                        flexDirection: "column",
+                                                                        alignItems: "center",
+                                                                        position: "relative",
                                                                         cursor: "not-allowed",
-                                                                        pointerEvents: "none",
+                                                                    }}
+                                                                    onMouseEnter={() => setHoveredPaidUpcomingCancelId(a.id)}
+                                                                    onMouseLeave={() => {
+                                                                        if (hoveredPaidUpcomingCancelId === a.id) {
+                                                                            setHoveredPaidUpcomingCancelId(null);
+                                                                        }
                                                                     }}
                                                                 >
-                                                                    Cancel Appointment
-                                                                </button>
-                                                                {hoveredPaidUpcomingCancelId === a.id && (
-                                                                    <span
+                                                                    <button
+                                                                        disabled
                                                                         style={{
-                                                                            position: "absolute",
-                                                                            bottom: "calc(100% + 8px)",
-                                                                            left: "50%",
-                                                                            transform: "translateX(-50%)",
-                                                                            backgroundColor: "#111827",
-                                                                            color: "#fff",
-                                                                            padding: "6px 8px",
-                                                                            borderRadius: "6px",
-                                                                            fontSize: "12px",
-                                                                            whiteSpace: "nowrap",
-                                                                            zIndex: 5,
+                                                                            opacity: 0.55,
+                                                                            cursor: "not-allowed",
+                                                                            pointerEvents: "none",
                                                                         }}
                                                                     >
-                                                                        Appointment has payment and cannot be cancelled
-                                                                    </span>
-                                                                )}
-                                                            </span>
-                                                        ) : (
-                                                            <span
-                                                                style={{
-                                                                    display: "inline-block",
-                                                                    padding: "6px 12px",
-                                                                    borderRadius: "999px",
-                                                                    backgroundColor: "#f2f4f7",
-                                                                    color: "#4b5563",
-                                                                    fontWeight: 600,
-                                                                    fontSize: "14px",
-                                                                }}
-                                                            >
-                                                                {cancelActionLabel(a)}
-                                                            </span>
-                                                        )}
+                                                                        Cancel Appointment
+                                                                    </button>
+                                                                    {hoveredPaidUpcomingCancelId === a.id && (
+                                                                        <span
+                                                                            style={{
+                                                                                position: "absolute",
+                                                                                bottom: "calc(100% + 8px)",
+                                                                                left: "50%",
+                                                                                transform: "translateX(-50%)",
+                                                                                backgroundColor: "#111827",
+                                                                                color: "#fff",
+                                                                                padding: "6px 8px",
+                                                                                borderRadius: "6px",
+                                                                                fontSize: "12px",
+                                                                                whiteSpace: "nowrap",
+                                                                                zIndex: 5,
+                                                                            }}
+                                                                        >
+                                                                            Appointment has payment and cannot be cancelled
+                                                                        </span>
+                                                                    )}
+                                                                </span>
+                                                            ) : (
+                                                                <span
+                                                                    style={{
+                                                                        display: "inline-block",
+                                                                        padding: "6px 12px",
+                                                                        borderRadius: "999px",
+                                                                        backgroundColor: "#f2f4f7",
+                                                                        color: "#4b5563",
+                                                                        fontWeight: 600,
+                                                                        fontSize: "14px",
+                                                                    }}
+                                                                >
+                                                                    {cancelActionLabel(a)}
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
+                                    </div>
                                 )}
                                 <button onClick={() => setShowUpcomingAppointments(false)} style={{ marginTop: "10px" }}>
                                     Hide Upcoming Appointments
@@ -761,16 +785,17 @@ function PatientDashboard() {
                         )}
                     </section>
 
-                    <section style={{ marginTop: "24px" }}>
+                    <section className="card">
                         <h2>Appointments History</h2>
                         {!showAppointmentsHistory ? (
                             <button onClick={() => setShowAppointmentsHistory(true)}>Show Appointments History</button>
                         ) : (
                             <>
                                 {historyAppointments.length === 0 ? (
-                                    <p>No past appointments yet.</p>
+                                    <div className="empty-state">No past appointments yet.</div>
                                 ) : (
-                                    <table border="1" cellPadding="8" style={centeredTableStyle}>
+                                    <div className="table-wrap">
+                                    <table style={centeredTableStyle}>
                                         <thead>
                                             <tr>
                                                 <th style={centeredCellStyle}>ID</th>
@@ -789,7 +814,9 @@ function PatientDashboard() {
                                                     <td style={centeredCellStyle}>{a.id}</td>
                                                     <td style={centeredCellStyle}>{formatDateDDMMYYYY(a.appointmentDate)}</td>
                                                     <td style={centeredCellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
-                                                    <td style={centeredCellStyle}>{a.status}</td>
+                                                    <td style={centeredCellStyle}>
+                                                        <span className={`status-badge ${getAppointmentStatusClass(a.status)}`}>{a.status}</span>
+                                                    </td>
                                                     <td style={centeredCellStyle}>{a.doctorName || a.doctorId}</td>
                                                     <td style={centeredCellStyle}>{a.serviceName || a.serviceId}</td>
                                                     <td style={centeredCellStyle}>
@@ -831,19 +858,18 @@ function PatientDashboard() {
                                                         </div>
                                                     </td>
                                                     <td style={centeredCellStyle}>
+                                                        <div className="actions-stack">
                                                         {editingNotesId === a.id ? (
                                                             <>
                                                                 <button
                                                                     onClick={() => onSaveAppointmentNotes(a.id)}
                                                                     disabled={actionLoadingId === a.id}
-                                                                    style={{ marginRight: "8px" }}
                                                                 >
                                                                     {actionLoadingId === a.id ? "Saving..." : "Save Notes"}
                                                                 </button>
                                                                 <button
                                                                     onClick={() => onCancelNotesEdit(a.id)}
                                                                     disabled={actionLoadingId === a.id}
-                                                                    style={{ marginRight: "8px" }}
                                                                 >
                                                                     Cancel Edit
                                                                 </button>
@@ -852,16 +878,17 @@ function PatientDashboard() {
                                                             <button
                                                                 onClick={() => onStartNotesEdit(a.id)}
                                                                 disabled={actionLoadingId === a.id}
-                                                                style={{ marginRight: "8px" }}
                                                             >
                                                                 Update Notes
                                                             </button>
                                                         )}
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
+                                    </div>
                                 )}
                                 <button onClick={() => setShowAppointmentsHistory(false)} style={{ marginTop: "10px" }}>
                                     Hide Appointments History
@@ -870,16 +897,17 @@ function PatientDashboard() {
                         )}
                     </section>
 
-                    <section style={{ marginTop: "24px" }}>
+                    <section className="card">
                         <h2>My Doctors</h2>
                         {!showDoctors ? (
                             <button onClick={() => setShowDoctors(true)}>Show Doctors</button>
                         ) : (
                             <>
                                 {doctors.length === 0 ? (
-                                    <p>No doctors found.</p>
+                                    <div className="empty-state">No doctors found.</div>
                                 ) : (
-                                    <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%" }}>
+                                    <div className="table-wrap">
+                                    <table className="table-readable">
                                         <thead>
                                             <tr>
                                                 <th>ID</th>
@@ -901,6 +929,7 @@ function PatientDashboard() {
                                             ))}
                                         </tbody>
                                     </table>
+                                    </div>
                                 )}
                                 <button onClick={() => setShowDoctors(false)} style={{ marginTop: "10px" }}>
                                     Hide Doctors
@@ -909,16 +938,17 @@ function PatientDashboard() {
                         )}
                     </section>
 
-                    <section style={{ marginTop: "24px" }}>
+                    <section className="card">
                         <h2>Medical Services</h2>
                         {!showMedicalServices ? (
                             <button onClick={() => setShowMedicalServices(true)}>Show Medical Services</button>
                         ) : (
                             <>
                                 {medicalServices.length === 0 ? (
-                                    <p>No medical services available.</p>
+                                    <div className="empty-state">No medical services available.</div>
                                 ) : (
-                                    <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%" }}>
+                                    <div className="table-wrap">
+                                    <table className="table-readable">
                                         <thead>
                                             <tr>
                                                 <th>ID</th>
@@ -940,6 +970,7 @@ function PatientDashboard() {
                                             ))}
                                         </tbody>
                                     </table>
+                                    </div>
                                 )}
                                 <button onClick={() => setShowMedicalServices(false)} style={{ marginTop: "10px" }}>
                                     Hide Medical Services

@@ -1,11 +1,7 @@
-Fully check the payment system
-Polish the frontend, make it nicer(styles folder)
-What is memo
-Make the frontend tests
-Use docker so the app runs all together
 Overall understanding of how the whole project works(backend with database, frontend)
 Learn how to talk about api calls,endpoints ...
 Check all the files
 Learn how to use database
 Learn the backend workflow and every folder
 Learn the frontend workflow and check all the files 
+Learn about Vite, Postcss, React, Javascript, .js, .jsx

@@ -14,7 +14,7 @@ import { extractApiErrorMessage } from "../utils/errors";
 import { formatDateDDMMYYYY, formatTimeHHmm } from "../utils/dateTime";
 import { sortAppointmentsByDateTime, filterAppointmentsByStatus } from "../utils/appointments";
 import { getDefaultAppointmentBookingForm } from "../utils/forms";
-import { getAnchoredActionMessageStyle, useAnchoredActionMessage } from "../utils/actionMessage";
+import { useAnchoredActionMessage } from "../utils/actionMessage";
 
 const SLOT_START_HOUR = 9;
 const SLOT_END_HOUR = 20;
@@ -64,7 +64,7 @@ const HALF_HOUR_SLOTS = createHalfHourSlots();
 function PatientAppointmentsPage() {
     const navigate = useNavigate();
     const dispatch = useDispatch();
-    const { anchor, message, captureActionAnchor, showActionMessage, clearActionMessage } =
+    const { message, captureActionAnchor, showActionMessage, clearActionMessage } =
         useAnchoredActionMessage();
 
     const [loading, setLoading] = useState(true);
@@ -375,37 +375,51 @@ function PatientAppointmentsPage() {
         padding: "8px",
         boxSizing: "border-box",
     };
+    const getAppointmentStatusClass = (status) => {
+        if (status === "SCHEDULED") return "status-scheduled";
+        if (status === "COMPLETED") return "status-completed";
+        if (status === "CANCELLED") return "status-cancelled";
+        return "status-cancelled";
+    };
 
     return (
-        <div style={{ padding: "24px" }} onClickCapture={handlePageClickCapture}>
-            <h1>Patient Appointments</h1>
+        <div className="page-container space-y-6" onClickCapture={handlePageClickCapture}>
+            <div className="card top-actions-bar flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <h1>Patient Appointments</h1>
+                    <p className="mt-1 text-sm text-slate-500">Book appointments and review schedule conflicts.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    <button onClick={() => navigate("/patient")} className="btn-secondary">
+                        Back To Dashboard
+                    </button>
+                    <button onClick={handleLogout} className="btn-secondary">Logout</button>
+                </div>
+            </div>
             {message?.text && (
-                <div style={getAnchoredActionMessageStyle(message.type, anchor)}>
+                <div className={`alert ${message.type === "success" ? "alert-success" : "alert-error"}`}>
                     {message.text}
                 </div>
             )}
-            {success && <p style={{ color: "green" }}>{success}</p>}
+            {success && <p className="alert alert-success">{success}</p>}
 
-            <div style={{ marginBottom: "16px" }}>
-                <button onClick={() => navigate("/patient")} style={{ marginRight: "8px" }}>
-                    Back To Dashboard
-                </button>
-                <button onClick={handleLogout}>Logout</button>
-            </div>
-
-            {loading && <p>Loading...</p>}
+            {loading && (
+                <div className="card">
+                    <p className="text-sm font-medium text-slate-600">Loading appointments...</p>
+                </div>
+            )}
             {!loading && needsProfile && (
-                <section>
+                <section className="card">
                     <p>You need to create your patient profile first.</p>
-                    <button onClick={() => navigate("/patient")}>Go To Dashboard</button>
+                    <button onClick={() => navigate("/patient")} className="btn-secondary">Go To Dashboard</button>
                 </section>
             )}
 
             {!loading && !needsProfile && (
                 <>
-                    <section style={{ maxWidth: "700px", marginBottom: "24px" }}>
+                    <section className="card max-w-4xl">
                         <h2>Book Appointment</h2>
-                        <form onSubmit={onBook}>
+                        <form onSubmit={onBook} className="mt-4 space-y-4">
                             <div style={{ marginBottom: "10px" }}>
                                 <label style={{ display: "block", marginBottom: "6px" }}>Doctor</label>
                                 <select
@@ -507,13 +521,13 @@ function PatientAppointmentsPage() {
                             </button>
                         </form>
                         {doctors.length === 0 && (
-                            <p style={{ marginTop: "10px" }}>
+                            <div className="empty-state mt-3">
                                 No available doctors for your account yet.
-                            </p>
+                            </div>
                         )}
                     </section>
 
-					<section style={{ marginBottom: "20px", maxWidth: "320px" }}>
+					<section className="card max-w-sm">
 						<h2>Check Date</h2>
 						<input
 							type="date"
@@ -523,12 +537,13 @@ function PatientAppointmentsPage() {
 						/>
 					</section>
 
-                    <section style={{ marginBottom: "24px" }}>
+                    <section className="card">
                         <h2>Unavailable Times For {formatDateDDMMYYYY(viewDate)}</h2>
                         {HALF_HOUR_SLOTS.every((slot) => viewBlockedSlots[slot].length === 0) ? (
-                            <p>All slots are available.</p>
+                            <div className="empty-state">All slots are available.</div>
                         ) : (
-                            <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%", maxWidth: "900px" }}>
+                            <div className="table-wrap">
+                            <table style={{ maxWidth: "900px" }}>
                                 <thead>
                                     <tr>
                                         <th>Time</th>
@@ -544,15 +559,17 @@ function PatientAppointmentsPage() {
                                     ))}
                                 </tbody>
                             </table>
+                            </div>
                         )}
                     </section>
 
-                    <section>
+                    <section className="card">
                         <h2>My Appointments On {formatDateDDMMYYYY(viewDate)}</h2>
                         {selectedDateAppointments.length === 0 ? (
-                            <p>No appointments for this date.</p>
+                            <div className="empty-state">No appointments for this date.</div>
                         ) : (
-                            <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%" }}>
+                            <div className="table-wrap">
+                            <table>
                                 <thead>
                                     <tr>
                                         <th>ID</th>
@@ -568,7 +585,9 @@ function PatientAppointmentsPage() {
                                         <tr key={a.id}>
                                             <td>{a.id}</td>
                                             <td>{formatTimeHHmm(a.appointmentTime, "")}</td>
-                                            <td>{a.status}</td>
+                                            <td>
+                                                <span className={`status-badge ${getAppointmentStatusClass(a.status)}`}>{a.status}</span>
+                                            </td>
                                             <td>{a.doctorName || a.doctorId}</td>
                                             <td>{a.serviceName || a.serviceId}</td>
                                             <td>{a.patientNotes || "-"}</td>
@@ -576,6 +595,7 @@ function PatientAppointmentsPage() {
                                     ))}
                                 </tbody>
                             </table>
+                            </div>
                         )}
                     </section>
                 </>

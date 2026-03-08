@@ -20,12 +20,12 @@ import {
 import { getAllAppointments } from "../features/user/appointmentApi";
 import { extractApiErrorMessage } from "../utils/errors";
 import { isValidEmail } from "../utils/forms";
-import { getAnchoredActionMessageStyle, useAnchoredActionMessage } from "../utils/actionMessage";
+import { useAnchoredActionMessage } from "../utils/actionMessage";
 
 function AdminDashboard() {
     const navigate = useNavigate();
     const dispatch = useDispatch();
-    const { anchor, message, captureActionAnchor, showActionMessage, clearActionMessage } =
+    const { message, captureActionAnchor, showActionMessage, clearActionMessage } =
         useAnchoredActionMessage();
 
     const handleLogout = () => {
@@ -41,9 +41,13 @@ function AdminDashboard() {
     });
     const [createLoading, setCreateLoading] = useState(false);
     const [createError, setCreateError] = useState("");
+    const [createEmailError, setCreateEmailError] = useState("");
     const [createSuccess, setCreateSuccess] = useState("");
 
     const handleCreateChange = (e) => {
+        if (e.target.name === "email") {
+            setCreateEmailError("");
+        }
         setCreateForm((prev) => ({
             ...prev,
             [e.target.name]: e.target.value,
@@ -54,11 +58,12 @@ function AdminDashboard() {
         
         e.preventDefault();
         setCreateError("");
+        setCreateEmailError("");
         setCreateSuccess("");
 
         const normalizedEmail = createForm.email.trim();
         if (!isValidEmail(normalizedEmail)) {
-            setCreateError("Please type a correct email");
+            setCreateEmailError("Please type a correct email");
             return;
         }
 
@@ -195,28 +200,35 @@ function AdminDashboard() {
     const [editForm, setEditForm] = useState({ username: "", email: "" });
     const [editLoading, setEditLoading] = useState(false);
     const [editError, setEditError] = useState("");
+    const [editEmailError, setEditEmailError] = useState("");
 
     const startEditUser = (user) => {
         setEditError("");
+        setEditEmailError("");
         setEditingUserId(user.id);
         setEditForm({ username: user.username, email: user.email });
     };
 
     const cancelEditUser = () => {
         setEditingUserId(null);
+        setEditEmailError("");
         setEditForm({ username: "", email: "" });
     };
 
     const handleEditChange = (e) => {
+        if (e.target.name === "email") {
+            setEditEmailError("");
+        }
         setEditForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
     };
 
     const saveEditUser = async (userId) => {
         setEditError("");
+        setEditEmailError("");
 
         const normalizedEmail = editForm.email.trim();
         if (!isValidEmail(normalizedEmail)) {
-            setEditError("Please type a correct email");
+            setEditEmailError("Please type a correct email");
             return;
         }
 
@@ -360,11 +372,13 @@ function AdminDashboard() {
 
     const clearAllMessages = () => {
         setCreateError("");
+        setCreateEmailError("");
         setCreateSuccess("");
         setUsersError("");
         setActionError("");
         setRoleError("");
         setEditError("");
+        setEditEmailError("");
         setPasswordError("");
         setPasswordSuccess("");
         setDeleteError("");
@@ -529,43 +543,44 @@ function AdminDashboard() {
         cursor: "not-allowed",
         filter: "grayscale(40%)",
     };
+    const sectionButtonSpacingStyle = { marginTop: "20px" };
 
     return (
-        <div style={{ padding: '24px' }} onClickCapture={handlePageClickCapture}>
-            <h1>Admin Dashboard</h1>
+        <div className="page-container page-accent-admin space-y-6" onClickCapture={handlePageClickCapture}>
+            <div className="card top-actions-bar hero-card hero-admin flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <h1>Admin Dashboard</h1>
+                    <p className="mt-1 text-sm text-slate-500">Operations and financial overview.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    <button onClick={() => navigate("/admin/payments")} className="btn-secondary">
+                        Open Payments Page
+                    </button>
+                    <button onClick={handleLogout} className="btn-secondary">Logout</button>
+                </div>
+            </div>
             {message?.text && (
-                <div style={getAnchoredActionMessageStyle(message.type, anchor)}>
+                <div className={`alert ${message.type === "success" ? "alert-success" : "alert-error"}`}>
                     {message.text}
                 </div>
             )}
-            {successMessage && <p style={{ color: "green" }}>{successMessage}</p>}
+            {successMessage && <p className="alert alert-success">{successMessage}</p>}
 
-            <button onClick={handleLogout} style={{ marginBottom: "20px"}}> 
-                Logout
-            </button>
-
-            <section style={{ marginBottom: "20px" }}>
-                <button onClick={() => navigate("/admin/payments")}>
-                    Open Payments Page
-                </button>
-            </section>
-
-            <section style={{ marginBottom: "28px", maxWidth: "520px" }}>
+            <section className="card max-w-2xl">
                 <h2>Create New User</h2>
 
-                <form onSubmit={handleCreateUser}>
-                    <div style={{ marginBottom: "10px"}}>
+                <form onSubmit={handleCreateUser} className="mt-4 space-y-4">
+                    <div>
                         <label>Username</label>
                         <input
                             name="username"
                             value={createForm.username}
                             onChange={handleCreateChange}
                             required
-                            style={{ width: "100%", padding: "8px"}}
                         />
                     </div>
 
-                    <div style={{ marginBottom: "10px"}}>
+                    <div>
                         <label>Email</label>
                         <input 
                             name="email"
@@ -573,11 +588,13 @@ function AdminDashboard() {
                             value={createForm.email}
                             onChange={handleCreateChange}
                             required
-                            style={{ width: "100%", padding: "8px"}}
                         />  
+                        {createEmailError && (
+                            <p className="mt-2 text-sm font-medium text-red-600">{createEmailError}</p>
+                        )}
                     </div>
 
-                    <div style={{ marginBottom: "10px"}}>
+                    <div>
                         <label>Password</label>
                         <input
                             name="password"
@@ -586,18 +603,16 @@ function AdminDashboard() {
                             onChange={handleCreateChange}
                             required
                             minLength={6}
-                            style={{ width: "100%", padding: "8px"}}
                         />
                     </div>
 
-                    <div style = {{ marginBottom: "12px"}}>
+                    <div>
                         <label>Role</label>
                         <select
                             name="role"
                             value={createForm.role}
                             onChange={handleCreateChange}
                             required
-                            style={{ width: "100%", padding: "8px" }}
                         >
                             <option value ="" disabled>Select Role</option>
                             <option value ="DOCTOR">Doctor</option>
@@ -605,45 +620,39 @@ function AdminDashboard() {
                         </select>
                     </div>
 
-                    <button type="submit" disabled={createLoading}>
+                    <button type="submit" disabled={createLoading} style={sectionButtonSpacingStyle}>
                         {createLoading ? "Creating..." : "Create User"}
                     </button>
                 </form>
 
             </section>
 
-            <section>
+            <section className="card">
                 <h2>Users</h2>
 
                 {showUsers && loadingUsers && <p>Loading users...</p>}
                 {showUsers && !loadingUsers && !usersError && (
-                    <table 
-                        border="2"
-                        cellPadding="8"
-                        style={{
-                            width: "100%",
-                            maxWidth: "1450px",
-                            borderCollapse: "collapse",
-                            tableLayout: "fixed",
-                            marginTop: "8px",
-                        }}
-                    >
-                        <thead>
-                            <tr>
-                                <th style={thStyle}> ID</th>
-                                <th style={thStyle}>Username</th>
-                                <th style={thStyle}>Email</th>
-                                <th style={thStyle}>Role</th>
-                                <th style={thStyle}>Enable/Disable</th>
-                                <th style={thStyle}>Change Role</th>
-                                <th style={thStyle}>Edit User</th>
-                                <th style={thStyle}>Change Password</th>
-                                <th style={thStyle}>Delete</th>
+                    users.length === 0 ? (
+                        <div className="empty-state">No users found.</div>
+                    ) : (
+                        <div className="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style={thStyle}> ID</th>
+                                    <th style={thStyle}>Username</th>
+                                    <th style={thStyle}>Email</th>
+                                    <th style={thStyle}>Role</th>
+                                    <th style={thStyle}>Enable/Disable</th>
+                                    <th style={thStyle}>Change Role</th>
+                                    <th style={thStyle}>Edit User</th>
+                                    <th style={thStyle}>Change Password</th>
+                                    <th style={thStyle}>Delete</th>
 
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {users.map((user) => {
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {users.map((user) => {
                                 const targetRole = user.role === "DOCTOR" ? "PATIENT" : "DOCTOR";
                                 const hasLockedProfile =
                                     (user.role === "DOCTOR" && !!user.hasDoctorProfile) ||
@@ -721,6 +730,11 @@ function AdminDashboard() {
                                                     onChange={handleEditChange}
                                                     style={{ marginBottom: "6px", width: "100%" }}
                                                 />
+                                                {editEmailError && (
+                                                    <p className="mt-1 text-left text-sm font-medium text-red-600">
+                                                        {editEmailError}
+                                                    </p>
+                                                )}
                                                 <button onClick={() => saveEditUser(user.id)} disabled={editLoading}>
                                                     {editLoading ? "Saving..." : "Save"}
                                                 </button>
@@ -806,9 +820,11 @@ function AdminDashboard() {
                                     </td>
                                 </tr>
                                 );
-                            })}
-                        </tbody>
-                    </table>
+                                })}
+                            </tbody>
+                        </table>
+                        </div>
+                    )
                 )}
                 <button 
                     onClick={async () => {
@@ -818,7 +834,7 @@ function AdminDashboard() {
                             await loadUsers();
                         }
                     }}
-                    style ={{ marginBottom:"10px"}}
+                    style={{ ...sectionButtonSpacingStyle, marginBottom: "10px" }}
                 >
                     {showUsers ? "Hide Users" : "Show Users"}
                 </button>
@@ -853,7 +869,7 @@ function AdminDashboard() {
                             <button onClick={() => setDeleteTarget(null)}>Cancel</button>
                             <button
                                 onClick={() => handleDeleteUser(deleteTarget)}
-                                style={{ background: "#dc2626", color: "#fff", border: "none", padding: "8px 12px", borderRadius: "6px" }}
+                                className="btn-danger"
                             >
                                 Delete
                             </button>
@@ -862,32 +878,30 @@ function AdminDashboard() {
                 </div>
             )}
 
-            <section style={{ marginTop: "28px" }}>
+            <section className="card max-w-2xl">
                 <h2>Create New Medical Service</h2>
 
-                <form onSubmit={handleCreateMedicalService} style={{ maxWidth: "520px", marginBottom: "16px" }}>
-                    <div style={{ marginBottom: "10px" }}>
+                <form onSubmit={handleCreateMedicalService} className="mt-4 space-y-4">
+                    <div>
                         <label>Name</label>
                         <input
                             name="name"
                             value={serviceCreateForm.name}
                             onChange={handleServiceCreateChange}
                             required
-                            style={{ width: "100%", padding: "8px" }}
                         />
                     </div>
 
-                    <div style={{ marginBottom: "10px" }}>
+                    <div>
                         <label>Description</label>
                         <input
                             name="description"
                             value={serviceCreateForm.description}
                             onChange={handleServiceCreateChange}
-                            style={{ width: "100%", padding: "8px" }}
                         />
                     </div>
 
-                    <div style={{ marginBottom: "10px" }}>
+                    <div>
                         <label>Price (USD)</label>
                         <input
                             type="number"
@@ -897,11 +911,10 @@ function AdminDashboard() {
                             value={serviceCreateForm.price}
                             onChange={handleServiceCreateChange}
                             required
-                            style={{ width: "100%", padding: "8px" }}
                         />
                     </div>
 
-                    <div style={{ marginBottom: "10px" }}>
+                    <div>
                         <label>Duration (minutes)</label>
                         <input
                             type="number"
@@ -910,46 +923,39 @@ function AdminDashboard() {
                             value={serviceCreateForm.duration}
                             onChange={handleServiceCreateChange}
                             required
-                            style={{ width: "100%", padding: "8px" }}
                         />
                     </div>
 
-                    <button type="submit" disabled={serviceCreateLoading}>
+                    <button type="submit" disabled={serviceCreateLoading} style={sectionButtonSpacingStyle}>
                         {serviceCreateLoading ? "Creating..." : "Create Medical Service"}
                     </button>
                 </form>
             </section>
 
-            <section style={{ marginTop: "28px" }}> 
+            <section className="card"> 
                 <h2>Medical Services</h2>
 
                 {showServices && (
                     servicesLoading ? (
                         <p>Loading medical services...</p>
                     ) : (
-                        <table
-                            border="2"
-                            cellPadding="8"
-                            style={{
-                                width: "100%",
-                                maxWidth: "1450px",
-                                borderCollapse: "collapse",
-                                tableLayout: "fixed",
-                                marginTop: "8px",
-                            }}
-                        >
-                            <thead>
-                                <tr>
-                                    <th style={thStyle}>ID</th>
-                                    <th style={thStyle}>Name</th>
-                                    <th style={thStyle}>Description</th>
-                                    <th style={thStyle}>Price (USD)</th>
-                                    <th style={thStyle}>Duration (minutes)</th>
-                                    <th style={thStyle}>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {services.map((service) => (
+                        services.length === 0 ? (
+                            <div className="empty-state">No medical services found.</div>
+                        ) : (
+                            <div className="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th style={thStyle}>ID</th>
+                                        <th style={thStyle}>Name</th>
+                                        <th style={thStyle}>Description</th>
+                                        <th style={thStyle}>Price (USD)</th>
+                                        <th style={thStyle}>Duration (minutes)</th>
+                                        <th style={thStyle}>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {services.map((service) => (
                                     <tr key={service.id}>
                                         <td style={tdStyle}>{service.id}</td>
                                         {editingServiceId === service.id ? (
@@ -1022,9 +1028,11 @@ function AdminDashboard() {
                                             </>
                                         )}
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                    ))}
+                                </tbody>
+                            </table>
+                            </div>
+                        )
                     )
                 )}
                 <button 
@@ -1035,6 +1043,7 @@ function AdminDashboard() {
                         await loadMedicalServices();
                     }
                  }}
+                 style={sectionButtonSpacingStyle}
 
                  >
                     {showServices ? "Hide Medical Services" : "Show Medical Services"}

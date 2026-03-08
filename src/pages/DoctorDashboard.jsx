@@ -23,13 +23,13 @@ import { sortAppointmentsByDateTime } from "../utils/appointments";
 import { formatDateDDMMYYYY, formatTimeHHmm, isFutureAppointment } from "../utils/dateTime";
 import { normalizeStatus } from "../utils/status";
 import { getDefaultDoctorProfileForm } from "../utils/forms";
-import { getAnchoredActionMessageStyle, useAnchoredActionMessage } from "../utils/actionMessage";
+import { useAnchoredActionMessage } from "../utils/actionMessage";
 
 
 function DoctorDashboard() {
     const navigate = useNavigate();
     const dispatch = useDispatch();
-    const { anchor, message, captureActionAnchor, showActionMessage, clearActionMessage } =
+    const { message, captureActionAnchor, showActionMessage, clearActionMessage } =
         useAnchoredActionMessage();
     
     const [doctor, setDoctor] = useState(null);
@@ -95,9 +95,12 @@ function DoctorDashboard() {
             getMyDoctorUnpaidAppointments(),
         ]);
 
+        const sortedHistory = sortAppointmentsByDateTime(historyData || []);
+        const sortedUpcoming = sortAppointmentsByDateTime(upcomingData || []);
+
         setPatients(patientsData);
-        setHistoryAppointments(historyData);
-        setUpcomingAppointments(upcomingData);
+        setHistoryAppointments(sortedHistory);
+        setUpcomingAppointments(sortedUpcoming);
         setPaidAppointmentIds(new Set((paidData || []).map((a) => Number(a.id))));
         const hasAnyPaymentIds = new Set((paidData || []).map((a) => Number(a.id)));
         (unpaidData || []).forEach((a) => {
@@ -109,7 +112,7 @@ function DoctorDashboard() {
         setAppointmentsWithPayments(hasAnyPaymentIds);
 
         const notesMap ={}; 
-        [...upcomingData, ...historyData].forEach((a) => {
+        [...sortedUpcoming, ...sortedHistory].forEach((a) => {
             notesMap[a.id] = a.doctorNotes || "";
         });
         setNotesById(notesMap);
@@ -347,57 +350,68 @@ function DoctorDashboard() {
         if (appointmentsWithPayments.has(Number(appointment?.id))) return "Paid";
         return "-";
     };
+    const getAppointmentStatusClass = (status) => {
+        if (status === "SCHEDULED") return "status-scheduled";
+        if (status === "COMPLETED") return "status-completed";
+        if (status === "CANCELLED") return "status-cancelled";
+        return "status-cancelled";
+    };
 
 
 
     return (
-        <div style={{ padding: "24px" }} onClickCapture={handlePageClickCapture}>
-            <h1>Doctor Dashboard</h1>
+        <div className="page-container page-accent-doctor space-y-6" onClickCapture={handlePageClickCapture}>
+            <div className="card top-actions-bar hero-card hero-doctor flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <h1>Doctor Dashboard</h1>
+                    <p className="mt-1 text-sm text-slate-500">Patient care and appointment workflow.</p>
+                </div>
+                <button onClick={handleLogout} className="btn-secondary w-full sm:w-auto">
+                    Logout
+                </button>
+            </div>
             {message?.text && (
-                <div style={getAnchoredActionMessageStyle(message.type, anchor)}>
+                <div className={`alert ${message.type === "success" ? "alert-success" : "alert-error"}`}>
                     {message.text}
                 </div>
             )}
-            
-            <button onClick={handleLogout}style={{ marginBottom: "16px" }}>
-                Logout
-            </button>
 
-            {loading && <p>Loading...</p>}
+            {loading && (
+                <div className="card">
+                    <p className="text-sm font-medium text-slate-600">Loading dashboard data...</p>
+                </div>
+            )}
             {!loading && needsProfile && (
-                <section style={{ marginTop: "16px", maxWidth: "480px"}}>
+                <section className="card max-w-2xl">
                     <h2>Create Your Profile</h2>
 
-                    <form onSubmit={handleCreateProfile}>
-                        <div style ={{ marginBottom: "10px"}}>
+                    <form onSubmit={handleCreateProfile} className="mt-4 space-y-4">
+                        <div>
                             <label>First Name</label>
                             <input
                                 name = "firstName"
                                 value = {profileForm.firstName}
                                 onChange = {handleProfileChange}
-                                style = {{ width: "100%", padding: "8px" }}
                                 required
                             />
                         </div>
 
-                        <div style ={{ marginBottom: "10px"}}>
+                        <div>
                             <label>Last Name</label>
                             <input
                                 name = "lastName"
                                 value = {profileForm.lastName}
                                 onChange = {handleProfileChange}
-                                style = {{ width: "100%", padding: "8px" }}
                                 required 
                             />
                         </div>
 
-                        <div style ={{ marginBottom: "10px"}}>
+                        <div>
                             <label>Specialty</label>
                             <select
                                 name = "specialty"
                                 value = {profileForm.specialty}
                                 onChange = {handleProfileChange}
-                                style = {{ width: "100%", padding: "8px" }}
                                 required
                             >
                                 <option value="" disabled>Select Specialty</option>
@@ -410,13 +424,12 @@ function DoctorDashboard() {
                             </select>
                         </div>
 
-                        <div style ={{marginBottom: "10px"}}>
+                        <div>
                             <label>Phone</label>
                             <input
                                 name = "phone"
                                 value = {profileForm.phone}
                                 onChange = {handleProfileChange}
-                                style = {{ width: "100%", padding: "8px" }}
                                 required
                             />
                         </div>
@@ -431,12 +444,12 @@ function DoctorDashboard() {
 
             {!loading && !needsProfile && (
                 <>
-                    <section style={{ marginTop: "16px"}}>
+                    <section className="card">
                         <h2>My Profile</h2>
 
                         {!isEditingProfile ? (
                             <>
-                                <p>
+                                <p className="mt-4">
                                     <strong>Name:</strong> {doctor.firstName} {doctor.lastName}
                                 </p>
                                 <p>
@@ -448,7 +461,7 @@ function DoctorDashboard() {
                                 <button onClick={() => setIsEditingProfile(true)}>
                                     Edit Profile
                                 </button>
-                                <div style={{ marginTop: "24px" }}>
+                                <div className="mt-6">
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -460,20 +473,19 @@ function DoctorDashboard() {
                                     </button>
                                 </div>
                                 {isChangingPassword && (
-                                    <form onSubmit={handleChangePassword} style={{ marginTop: "10px", maxWidth: "480px" }}>
-                                        <div style={{ marginBottom: "10px" }}>
-                                            <label style={{ display: "block", marginBottom: "8px" }}>Old Password</label>
+                                    <form onSubmit={handleChangePassword} className="mt-3 max-w-xl space-y-4">
+                                        <div>
+                                            <label>Old Password</label>
                                             <input
                                                 type="password"
                                                 name="oldPassword"
                                                 value={passwordForm.oldPassword}
                                                 onChange={handlePasswordFormChange}
                                                 required
-                                                style={{ width: "100%", padding: "8px" }}
                                             />
                                         </div>
-                                        <div style={{ marginBottom: "10px" }}>
-                                            <label style={{ display: "block", marginBottom: "8px" }}>New Password</label>
+                                        <div>
+                                            <label>New Password</label>
                                             <input
                                                 type="password"
                                                 name="newPassword"
@@ -481,13 +493,12 @@ function DoctorDashboard() {
                                                 onChange={handlePasswordFormChange}
                                                 minLength={6}
                                                 required
-                                                style={{ width: "100%", padding: "8px" }}
                                             />
                                         </div>
                                         <button
                                             type="submit"
                                             disabled={passwordLoading}
-                                            style={{ marginRight: "8px" }}
+                                            className="mr-2"
                                         >
                                             {passwordLoading ? "Saving..." : "Save Password"}
                                         </button>
@@ -502,36 +513,33 @@ function DoctorDashboard() {
                                 )}
                             </>
                         ) : (
-                            <form onSubmit={handleUpdateProfile}>
-                                <div style={{ marginBottom: "16px" }}>
+                            <form onSubmit={handleUpdateProfile} className="mt-4 max-w-xl space-y-4">
+                                <div>
                                     <label>First Name</label>
                                     <input
                                         name="firstName"
                                         value={profileForm.firstName}
                                         onChange={handleProfileChange}
-                                        style={{ width: "100%", padding: "8px" }}
                                         required
                                     />
                                 </div>
 
-                                <div style={{ marginBottom: "10px" }}>
+                                <div>
                                     <label>Last Name</label>
                                     <input
                                         name="lastName"
                                         value={profileForm.lastName}
                                         onChange={handleProfileChange}
-                                        style={{ width: "100%", padding: "8px" }}
                                         required
                                     />
                                 </div>
 
-                                <div style ={{ marginBottom: "10px"}}>
+                                <div>
                                     <label>Specialty</label>
                                     <select
                                         name = "specialty"
                                         value = {profileForm.specialty}
                                         onChange = {handleProfileChange}
-                                        style = {{ width: "100%", padding: "8px" }}
                                         required
                                     >
                                         <option value="" disabled>Select Specialty</option>
@@ -544,18 +552,17 @@ function DoctorDashboard() {
                                     </select>
                                 </div>
 
-                                <div style ={{marginBottom: "10px"}}>
+                                <div>
                                     <label>Phone</label>
                                     <input
                                         name = "phone"
                                         value = {profileForm.phone}
                                         onChange = {handleProfileChange}
-                                        style = {{ width: "100%", padding: "8px" }}
                                         required
                                     />
                                 </div>
 
-                                <button type="submit" disabled={profileLoading} style={{ marginRight: "8px" }}>
+                                <button type="submit" disabled={profileLoading} className="mr-2">
                                     {profileLoading ? "Saving..." : "Save"}
                                 </button>
                                 <button type="button" onClick={() => setIsEditingProfile(false)}>
@@ -565,13 +572,13 @@ function DoctorDashboard() {
                         )}
                     </section>
 
-                    <section style={{ marginTop: "24px" }}>
+                    <section className="card">
                         <button onClick={() => navigate("/doctor/payments")}>
                             Open Payments Page
                         </button>
                     </section>
 
-                    <section style={{ marginTop: "24px" }}>
+                    <section className="card">
                         <h2>Filter Appointments By Status</h2>
                         <select
                             value={statusFilter}
@@ -588,9 +595,10 @@ function DoctorDashboard() {
                         {statusFilter !== "NONE" && (
                             <div style={{ marginTop: "12px" }}>
                                 {filteredAppointments.length === 0 ? (
-                                    <p>No appointments found for selected status.</p>
+                                    <div className="empty-state">No appointments found for selected status.</div>
                                 ) : (
-                                    <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%" }}>
+                                    <div className="table-wrap">
+                                    <table>
                                         <thead>
                                             <tr>
                                                 <th>ID</th>
@@ -607,28 +615,32 @@ function DoctorDashboard() {
                                                     <td>{a.id}</td>
                                                     <td>{formatDateDDMMYYYY(a.appointmentDate)}</td>
                                                     <td>{formatTimeHHmm(a.appointmentTime)}</td>
-                                                    <td>{a.status}</td>
+                                                    <td>
+                                                        <span className={`status-badge ${getAppointmentStatusClass(a.status)}`}>{a.status}</span>
+                                                    </td>
                                                     <td>{a.patientName || a.patientId}</td>
                                                     <td>{a.serviceName || a.serviceId}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
+                                    </div>
                                 )}
                             </div>
                         )}
                     </section>
 
-                    <section style={{ marginTop: "24px"}}>
+                    <section className="card">
                         <h2>Upcoming Appointments</h2>
                         {!showUpcomingAppointments ? (
                             <button onClick={() => setShowUpcomingAppointments(true)}>Show Upcoming Appointments</button>
                         ) : (
                             <>
                                 {upcomingAppointments.length === 0 ? (
-                                    <p>No upcoming appointments.</p>
+                                    <div className="empty-state">No upcoming appointments.</div>
                                 ) : (
-                                    <table border="1" cellPadding="8" style={centeredTableStyle}>
+                                    <div className="table-wrap">
+                                    <table className="table-readable" style={centeredTableStyle}>
                                         <thead>
                                             <tr>
                                                 <th style={centeredCellStyle}>ID</th>
@@ -647,7 +659,9 @@ function DoctorDashboard() {
                                                     <td style={centeredCellStyle}>{a.id}</td>
                                                     <td style={centeredCellStyle}>{formatDateDDMMYYYY(a.appointmentDate)}</td>
                                                     <td style={centeredCellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
-                                                    <td style={centeredCellStyle}>{a.status}</td>
+                                                    <td style={centeredCellStyle}>
+                                                        <span className={`status-badge ${getAppointmentStatusClass(a.status)}`}>{a.status}</span>
+                                                    </td>
                                                     <td style={centeredCellStyle}>{a.patientName}</td>
                                                     <td style={centeredCellStyle}>{a.serviceName}</td>
                                                     <td style={centeredCellStyle}>
@@ -689,19 +703,18 @@ function DoctorDashboard() {
                                                         </div>
                                                     </td>
                                                     <td style={centeredCellStyle}>
+                                                        <div className="actions-stack">
                                                         {editingNotesId === a.id ? (
                                                             <>
                                                                 <button
                                                                     onClick={() => onSaveNotes(a.id)}
                                                                     disabled={actionLoadingId === a.id}
-                                                                    style={{ marginRight: "8px" }}
                                                                 >
                                                                     {actionLoadingId === a.id ? "Saving..." : "Save Notes"}
                                                                 </button>
                                                                 <button
                                                                     onClick={() => onCancelNotesEdit(a.id)}
                                                                     disabled={actionLoadingId === a.id}
-                                                                    style={{ marginRight: "8px" }}
                                                                 >
                                                                     Cancel Edit
                                                                 </button>
@@ -710,7 +723,6 @@ function DoctorDashboard() {
                                                             <button
                                                                 onClick={() => onStartNotesEdit(a.id)}
                                                                 disabled={actionLoadingId === a.id}
-                                                                style={{ marginRight: "8px" }}
                                                             >
                                                                 Update Notes
                                                             </button>
@@ -783,11 +795,13 @@ function DoctorDashboard() {
                                                                 {cancelActionLabel(a)}
                                                             </span>
                                                         )}
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
+                                    </div>
                                 )}
                                 <button onClick={() => setShowUpcomingAppointments(false)} style={{ marginTop: "10px" }}>
                                     Hide Upcoming Appointments
@@ -796,16 +810,17 @@ function DoctorDashboard() {
                         )}
                     </section>
 
-                    <section style ={{marginTop: "24px"}}>
+                    <section className="card">
                         <h2>Appointments History</h2>
                         {!showAppointmentsHistory ? (
                             <button onClick={() => setShowAppointmentsHistory(true)}>Show Appointments History</button>
                         ) : (
                             <>
                                 {historyAppointments.length === 0? (
-                                    <p>No past appointments yet.</p>
+                                    <div className="empty-state">No past appointments yet.</div>
                                 ) : (
-                                    <table border="1" cellPadding="8" style={centeredTableStyle}>
+                                    <div className="table-wrap">
+                                    <table className="table-readable" style={centeredTableStyle}>
                                         <thead>
                                             <tr>
                                                 <th style={centeredCellStyle}>ID</th>
@@ -824,7 +839,9 @@ function DoctorDashboard() {
                                                     <td style={centeredCellStyle}>{a.id}</td>
                                                     <td style={centeredCellStyle}>{formatDateDDMMYYYY(a.appointmentDate)}</td>
                                                     <td style={centeredCellStyle}>{formatTimeHHmm(a.appointmentTime)}</td>
-                                                    <td style={centeredCellStyle}>{a.status}</td>
+                                                    <td style={centeredCellStyle}>
+                                                        <span className={`status-badge ${getAppointmentStatusClass(a.status)}`}>{a.status}</span>
+                                                    </td>
                                                     <td style={centeredCellStyle}>{a.patientName || a.patientId}</td>
                                                     <td style={centeredCellStyle}>{a.serviceName || a.serviceId}</td>
                                                     <td style={centeredCellStyle}>
@@ -866,19 +883,18 @@ function DoctorDashboard() {
                                                         </div>
                                                     </td>
                                                     <td style={centeredCellStyle}>
+                                                        <div className="actions-stack">
                                                         {editingNotesId === a.id ? (
                                                             <>
                                                                 <button
                                                                     onClick={() => onSaveNotes(a.id)}
                                                                     disabled={actionLoadingId === a.id}
-                                                                    style={{ marginRight: "8px" }}
                                                                 >
                                                                     {actionLoadingId === a.id ? "Saving..." : "Save Notes"}
                                                                 </button>
                                                                 <button
                                                                     onClick={() => onCancelNotesEdit(a.id)}
                                                                     disabled={actionLoadingId === a.id}
-                                                                    style={{ marginRight: "8px" }}
                                                                 >
                                                                     Cancel Edit
                                                                 </button>
@@ -887,12 +903,11 @@ function DoctorDashboard() {
                                                             <button
                                                                 onClick={() => onStartNotesEdit(a.id)}
                                                                 disabled={actionLoadingId === a.id}
-                                                                style={{ marginRight: "8px" }}
                                                             >
                                                                 Update Notes
                                                             </button>
                                                         )}
-                                                        {a.status === "SCHEDULED" && (
+                                                        {a.status === "SCHEDULED" ? (
                                                             <span
                                                                 style={{
                                                                     display: "inline-flex",
@@ -943,12 +958,22 @@ function DoctorDashboard() {
                                                                     </span>
                                                                 )}
                                                             </span>
-                                                        )}
+                                                        ) : a.status === "COMPLETED" ? (
+                                                            <button disabled style={{ opacity: 0.55, cursor: "not-allowed", pointerEvents: "none" }}>
+                                                                Completed
+                                                            </button>
+                                                        ) : a.status === "CANCELLED" ? (
+                                                            <button disabled style={{ opacity: 0.55, cursor: "not-allowed", pointerEvents: "none" }}>
+                                                                Cancelled
+                                                            </button>
+                                                        ) : null}
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
+                                    </div>
                                 )}
                                 <button onClick={() => setShowAppointmentsHistory(false)} style={{ marginTop: "10px" }}>
                                     Hide Appointments History
@@ -957,16 +982,17 @@ function DoctorDashboard() {
                         )}
                     </section>
 
-                    <section style={{ marginTop: "24px", marginBottom: "24px" }}>
+                    <section className="card">
                         <h2>My Patients</h2>
                         {!showMyPatients ? (
                             <button onClick={() => setShowMyPatients(true)}>Show My Patients</button>
                         ) : (
                             <>
                                 {patients.length === 0 ? (
-                                    <p>No patients found.</p>
+                                    <div className="empty-state">No patients found.</div>
                                 ) : (
-                                    <table border="1" cellPadding="8" style={centeredTableStyle}>
+                                    <div className="table-wrap">
+                                    <table style={centeredTableStyle}>
                                         <thead>
                                             <tr>
                                                 <th style={centeredCellStyle}>ID</th>
@@ -988,6 +1014,7 @@ function DoctorDashboard() {
                                             ))}
                                         </tbody>
                                     </table>
+                                    </div>
                                 )}
                                 <button onClick={() => setShowMyPatients(false)} style={{ marginTop: "10px" }}>
                                     Hide My Patients
